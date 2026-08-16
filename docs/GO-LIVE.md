@@ -98,14 +98,41 @@ Local testing: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
 
 ---
 
-## 5. Resend (email)
+## 5. Email — two options (pick either or both)
 
-1. <https://resend.com> → add & **verify your sending domain** (DNS records they
-   provide: SPF + DKIM). This is what keeps emails out of spam.
+Booking emails are sent using, in order: **the tenant's own SMTP**, then a
+**platform-wide Resend** key, else nothing (no error).
+
+**Option A — each business connects their own email (no env vars).**
+In the app: **Settings → Integrations → Email delivery → "My own email (SMTP)"**.
+For Gmail: host `smtp.gmail.com`, port `587`, username = the Gmail address, and a
+**Google App Password** (Google Account → Security → 2-Step Verification → App
+passwords) as the password. Then **Send test email** to confirm. The password is
+stored server-side only. This is the simplest path for a single business.
+
+**Option B — platform-wide Resend (one sender for everyone).**
+1. <https://resend.com> → add & **verify your sending domain** (SPF + DKIM DNS
+   records they provide). This keeps emails out of spam.
 2. Create an API key → `RESEND_API_KEY`.
 3. Set `RESEND_FROM_EMAIL="Diamond Booking <notifications@diamond-booking.com>"`.
-4. Redeploy. Booking confirmations now send automatically
-   (`src/lib/integrations/email.ts`). No key = no email, no error.
+4. Redeploy.
+
+## 5b. Super admin (platform owner)
+
+Your own platform-admin login (for `/admin`) is set by env vars, like an API key:
+
+1. Set in Vercel (and `.env.local` for local):
+   ```
+   SUPER_ADMIN_EMAIL=you@yourdomain.com
+   SUPER_ADMIN_PASSWORD=a-long-strong-password
+   ```
+2. Deploy, then visit **`{APP_URL}/api/admin/setup`** once in your browser. It
+   provisions the super-admin account from those env vars (idempotent — change
+   the password and revisit to rotate).
+3. Sign in at `/login` with those credentials → you land on `/admin`.
+
+Requires `SUPABASE_SERVICE_ROLE_KEY` to be set. Only ever provisions that one
+env-defined account, so the endpoint is safe to reach.
 
 ---
 
