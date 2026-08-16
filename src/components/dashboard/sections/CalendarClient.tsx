@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { timeRange } from "@/lib/format";
+import { timeRange, zonedHourFraction, zonedYmd } from "@/lib/format";
 import type { CalendarData, CalendarEvent } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Sheet } from "../Modal";
@@ -32,15 +32,18 @@ function addDays(d: Date, n: number) {
   x.setDate(x.getDate() + n);
   return x;
 }
-function sameDay(a: Date, b: Date) {
-  return startOfDay(a).getTime() === startOfDay(b).getTime();
+/** 'YYYY-MM-DD' for a calendar-day Date (its local Y/M/D, used to label columns). */
+function ymdLocal(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function CalendarClient({
   data,
+  timezone,
   preview,
 }: {
   data: CalendarData;
+  timezone: string;
   preview: boolean;
 }) {
   const [events, setEvents] = useState(data.events);
@@ -171,6 +174,7 @@ export function CalendarClient({
         <MonthView
           anchor={anchor}
           events={visibleEvents}
+          tz={timezone}
           onReschedule={reschedule}
           onOpen={setSelected}
         />
@@ -178,6 +182,7 @@ export function CalendarClient({
         <TimeGrid
           days={view === "day" ? [anchor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(anchor), i))}
           events={visibleEvents}
+          tz={timezone}
           onReschedule={reschedule}
           onOpen={setSelected}
         />
@@ -189,7 +194,7 @@ export function CalendarClient({
           eyebrow="Appointment"
           title={selected.customerName}
         >
-          <EventDetail e={selected} />
+          <EventDetail e={selected} tz={timezone} />
         </Sheet>
       )}
     </div>
@@ -201,14 +206,17 @@ export function CalendarClient({
 function TimeGrid({
   days,
   events,
+  tz,
   onReschedule,
   onOpen,
 }: {
   days: Date[];
   events: CalendarEvent[];
+  tz: string;
   onReschedule: (id: string, start: Date) => void;
   onOpen: (e: CalendarEvent) => void;
 }) {
+  const todayYmd = zonedYmd(new Date(), tz);
   const gridRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{
     id: string;
@@ -266,7 +274,7 @@ function TimeGrid({
       >
         <div />
         {days.map((d) => {
-          const today = sameDay(d, new Date());
+          const today = ymdLocal(d) === todayYmd;
           return (
             <div key={d.toISOString()} className="border-l border-line px-2 py-2.5 text-center">
               <p className="text-[0.66rem] font-bold tracking-[0.08em] text-ink-faint uppercase">
@@ -306,7 +314,8 @@ function TimeGrid({
 
           {/* day columns */}
           {days.map((day) => {
-            const dayEvents = events.filter((e) => sameDay(new Date(e.startsAt), day));
+            const dayKey = ymdLocal(day);
+            const dayEvents = events.filter((e) => zonedYmd(e.startsAt, tz) === dayKey);
             return (
               <div
                 key={day.toISOString()}
@@ -320,6 +329,7 @@ function TimeGrid({
                   <EventBlock
                     key={ev.id}
                     ev={ev}
+                    tz={tz}
                     dragging={drag?.id === ev.id ? drag : null}
                     onPointerDown={(e) => onPointerDown(e, ev)}
                     onPointerUp={() => onPointerUp(ev)}
@@ -336,18 +346,20 @@ function TimeGrid({
 
 function EventBlock({
   ev,
+  tz,
   dragging,
   onPointerDown,
   onPointerUp,
 }: {
   ev: CalendarEvent;
+  tz: string;
   dragging: { dx: number; dy: number } | null;
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerUp: () => void;
 }) {
   const start = new Date(ev.startsAt);
   const end = new Date(ev.endsAt);
-  const top = ((start.getHours() - START_HOUR) + start.getMinutes() / 60) * HOUR_H;
+  const top = (zonedHourFraction(start, tz) - START_HOUR) * HOUR_H;
   const height = Math.max(22, ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_H - 2);
   const faded = ev.status === "completed" || ev.status === "no_show";
 
@@ -383,11 +395,13 @@ function EventBlock({
 function MonthView({
   anchor,
   events,
+  tz,
   onReschedule,
   onOpen,
 }: {
   anchor: Date;
   events: CalendarEvent[];
+  tz: string;
   onReschedule: (id: string, start: Date) => void;
   onOpen: (e: CalendarEvent) => void;
 }) {
@@ -395,6 +409,7 @@ function MonthView({
   const gridStart = startOfWeek(first);
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const [dragId, setDragId] = useState<string | null>(null);
+  const todayYmd = zonedYmd(new Date(), tz);
 
   function drop(day: Date) {
     if (!dragId) return;
@@ -420,8 +435,8 @@ function MonthView({
       <div className="grid grid-cols-7">
         {cells.map((day, i) => {
           const inMonth = day.getMonth() === anchor.getMonth();
-          const today = sameDay(day, new Date());
-          const dayEvents = events.filter((e) => sameDay(new Date(e.startsAt), day));
+          const today = ymdLocal(day) === todayYmd;
+          const dayEvents = events.filter((e) => zonedYmd(e.startsAt, tz) === ymdLocal(day));
           return (
             <div
               key={i}
@@ -453,7 +468,7 @@ function MonthView({
                   >
                     <span className="h-1.5 w-1.5 flex-none rounded-full" style={{ backgroundColor: ev.employeeColor }} />
                     <span className="truncate text-[0.66rem] font-medium text-ink">
-                      {new Date(ev.startsAt).toLocaleTimeString("en-US", { hour: "numeric" })} {ev.customerName}
+                      {new Date(ev.startsAt).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric" })} {ev.customerName}
                     </span>
                   </button>
                 ))}
@@ -471,7 +486,7 @@ function MonthView({
   );
 }
 
-function EventDetail({ e }: { e: CalendarEvent }) {
+function EventDetail({ e, tz }: { e: CalendarEvent; tz: string }) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -486,9 +501,9 @@ function EventDetail({ e }: { e: CalendarEvent }) {
       <div className="rounded-[14px] border border-line bg-surface-alt/40 p-4">
         <p className="font-display text-[1.05rem] font-semibold text-ink">{e.serviceName}</p>
         <p className="mt-1 text-[0.82rem] text-ink-muted">
-          {new Date(e.startsAt).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+          {new Date(e.startsAt).toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })}
         </p>
-        <p className="text-[0.82rem] text-ink-muted">{timeRange(e.startsAt, e.endsAt)}</p>
+        <p className="text-[0.82rem] text-ink-muted">{timeRange(e.startsAt, e.endsAt, tz)}</p>
       </div>
       <p className="text-[0.82rem] leading-[1.6] text-ink-faint">
         Drag the appointment on the calendar to reschedule, or open it from

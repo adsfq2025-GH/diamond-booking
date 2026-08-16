@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { PLANS, PLAN_ORDER } from "@/lib/plans";
 import { openBillingPortal, startCheckout } from "@/lib/actions/billing";
+import { saveBusinessProfile } from "@/lib/actions/settings";
+import { COMMON_TIMEZONES } from "@/lib/onboarding/types";
+import type { BusinessProfile } from "@/lib/dashboard/data";
 import type { PlanTier } from "@/types/database";
 import { Icon, type IconName } from "../icons";
 import { Panel, PanelHeader } from "../ui";
@@ -30,14 +33,12 @@ export interface IntegrationFlags {
 }
 
 export function SettingsClient({
-  tenantName,
-  ownerEmail,
+  profile,
   plan,
   preview,
   integrations,
 }: {
-  tenantName: string;
-  ownerEmail: string;
+  profile: BusinessProfile;
   plan: PlanTier;
   preview: boolean;
   integrations: IntegrationFlags;
@@ -87,7 +88,7 @@ export function SettingsClient({
         </nav>
 
         <div>
-          {tab === "profile" && <ProfileTab tenantName={tenantName} ownerEmail={ownerEmail} />}
+          {tab === "profile" && <ProfileTab profile={profile} preview={preview} />}
           {tab === "notifications" && <NotificationsTab plan={plan} />}
           {tab === "integrations" && <IntegrationsTab flags={integrations} />}
           {tab === "security" && <SecurityTab />}
@@ -108,23 +109,57 @@ function SaveBar() {
   );
 }
 
-function ProfileTab({ tenantName, ownerEmail }: { tenantName: string; ownerEmail: string }) {
+function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: boolean }) {
+  const [form, setForm] = useState<BusinessProfile>(profile);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+  const set = <K extends keyof BusinessProfile>(k: K, v: BusinessProfile[K]) =>
+    setForm((p) => ({ ...p, [k]: v }));
+
+  async function save() {
+    setBusy(true);
+    setNotice(null);
+    const res = await saveBusinessProfile(form);
+    setNotice(res.ok ? { ok: true, msg: "Saved. Times now display in your timezone." } : { ok: false, msg: res.error });
+    setBusy(false);
+  }
+
+  const industries = ["Cleaning", "HVAC", "Plumbing", "Landscaping", "Roofing", "Electrical", "Pest control", "Other"];
+  const zones = Array.from(new Set([form.timezone, ...COMMON_TIMEZONES]));
+
   return (
     <Panel>
       <PanelHeader title="Business profile" caption="Appears on your widget, invoices and emails" />
       <div className="px-5 py-5">
+        {notice && (
+          <div
+            className={cn(
+              "mb-4 rounded-[12px] border px-4 py-3 text-[0.82rem]",
+              notice.ok
+                ? "border-success-500/30 bg-success-50 text-success-700"
+                : "border-[#e4b7b5] bg-[#fdf6f5] text-[#8c3531]",
+            )}
+          >
+            {notice.msg}
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Business name" defaultValue={tenantName} />
-          <SelectField label="Industry" options={["Cleaning", "HVAC", "Plumbing", "Landscaping", "Roofing"]} />
-          <Field label="Contact email" defaultValue={ownerEmail} type="email" />
-          <Field label="Phone" defaultValue="+1 (555) 010-0000" />
-          <Field label="Street address" defaultValue="482 Maple Ave" className="sm:col-span-2" />
-          <Field label="City" defaultValue="Springfield" />
-          <Field label="State" defaultValue="IL" />
-          <Field label="ZIP" defaultValue="62704" />
-          <SelectField label="Timezone" options={["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"]} />
+          <TField label="Business name" value={form.name} onChange={(v) => set("name", v)} />
+          <TSelect label="Industry" value={form.industry} options={industries} onChange={(v) => set("industry", v)} />
+          <TField label="Contact email" type="email" value={form.email} onChange={(v) => set("email", v)} />
+          <TField label="Phone" value={form.phone} onChange={(v) => set("phone", v)} />
+          <TField label="Street address" value={form.street} onChange={(v) => set("street", v)} className="sm:col-span-2" />
+          <TField label="City" value={form.city} onChange={(v) => set("city", v)} />
+          <TField label="State" value={form.state} onChange={(v) => set("state", v)} />
+          <TField label="ZIP" value={form.zip} onChange={(v) => set("zip", v)} />
+          <TSelect label="Timezone" value={form.timezone} options={zones} onChange={(v) => set("timezone", v)} />
         </div>
-        <SaveBar />
+        <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+          <GhostBtn onClick={() => setForm(profile)}>Reset</GhostBtn>
+          <ActionButton icon="check" onClick={save}>
+            {busy ? "Saving…" : preview ? "Save (preview)" : "Save changes"}
+          </ActionButton>
+        </div>
       </div>
     </Panel>
   );
@@ -362,15 +397,56 @@ function Field({
     </div>
   );
 }
-function SelectField({ label, options }: { label: string; options: string[] }) {
-  const id = label.toLowerCase().replace(/\s+/g, "-");
+/** Controlled text field. */
+function TField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  className?: string;
+}) {
+  const id = "f-" + label.toLowerCase().replace(/\s+/g, "-");
+  return (
+    <div className={className}>
+      <Label htmlFor={id}>{label}</Label>
+      <input id={id} type={type} value={value} onChange={(e) => onChange(e.target.value)} className={inputBase} />
+    </div>
+  );
+}
+
+/** Controlled select. */
+function TSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  const id = "s-" + label.toLowerCase().replace(/\s+/g, "-");
   return (
     <div>
       <Label htmlFor={id}>{label}</Label>
       <SelectShell>
-        <select id={id} className={cn(inputBase, "appearance-none pr-9")}>
+        <select
+          id={id}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(inputBase, "appearance-none pr-9")}
+        >
           {options.map((o) => (
-            <option key={o}>{o}</option>
+            <option key={o} value={o}>
+              {o}
+            </option>
           ))}
         </select>
       </SelectShell>

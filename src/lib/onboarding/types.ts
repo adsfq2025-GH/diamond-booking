@@ -40,6 +40,14 @@ export interface BusinessInfoInput {
   timezone: string;
 }
 
+export interface ServiceAddonInput {
+  /** Client-side key, stable across edits. */
+  localId: string;
+  name: string;
+  price_cents: number;
+  duration_minutes: number;
+}
+
 export interface ServiceInput {
   /** Client-side key, stable across saves. */
   localId: string;
@@ -50,6 +58,8 @@ export interface ServiceInput {
   deposit_cents: number;
   buffer_before_minutes: number;
   buffer_after_minutes: number;
+  /** Optional add-on services customers can tack on (e.g. inside fridge). */
+  addons: ServiceAddonInput[];
 }
 
 export interface TeamMemberInput {

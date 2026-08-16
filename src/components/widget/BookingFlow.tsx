@@ -23,13 +23,18 @@ export function BookingFlow({
   publicKey,
   config,
   embedded,
+  emailWillSend,
 }: {
   publicKey: string;
   config: WidgetConfigPayload;
   embedded: boolean;
+  emailWillSend: boolean;
 }) {
   const accent = (config.theme as { primary_color?: string })?.primary_color ?? "#2e86c1";
   const customFields = (config.custom_fields as CustomField[]) ?? [];
+  // Times display in the business's timezone so the widget and the owner's
+  // dashboard always agree on when an appointment is.
+  const tz = config.tenant.timezone || undefined;
 
   const [step, setStep] = useState(0);
   const [service, setService] = useState<Service | null>(null);
@@ -131,6 +136,7 @@ export function BookingFlow({
               date={date}
               slot={slot}
               accent={accent}
+              tz={tz}
               onDate={(d) => {
                 setDate(d);
                 setSlot(null);
@@ -146,6 +152,7 @@ export function BookingFlow({
               service={service}
               slot={slot}
               accent={accent}
+              tz={tz}
               details={details}
               custom={custom}
               customFields={customFields}
@@ -183,7 +190,9 @@ export function BookingFlow({
               result={result}
               service={service}
               accent={accent}
+              tz={tz}
               email={details.email}
+              emailWillSend={emailWillSend}
             />
           )}
         </div>
@@ -286,8 +295,26 @@ function ServiceStep({
         </div>
       )}
 
-      <PrimaryBtn accent={accent} disabled={!selected} onClick={onNext} className="mt-5">
-        Continue{selected ? ` · ${money(priceTotal)}` : ""}
+      {selected && (
+        <div className="mt-5 flex items-center justify-between rounded-[12px] border border-line bg-surface-alt/60 px-4 py-3">
+          <div>
+            <p className="text-[0.7rem] font-semibold tracking-wide text-ink-faint uppercase">Total</p>
+            {addons.size > 0 && (
+              <p className="text-[0.72rem] text-ink-faint">
+                {money(selected.price_cents)}
+                {" + "}
+                {money(priceTotal - selected.price_cents)} add-ons
+              </p>
+            )}
+          </div>
+          <p className="font-instrument text-[1.5rem] leading-none font-semibold text-ink" aria-live="polite">
+            {money(priceTotal)}
+          </p>
+        </div>
+      )}
+
+      <PrimaryBtn accent={accent} disabled={!selected} onClick={onNext} className="mt-3">
+        Continue
       </PrimaryBtn>
     </div>
   );
@@ -300,6 +327,7 @@ function TimeStep({
   date,
   slot,
   accent,
+  tz,
   onDate,
   onSlot,
   onBack,
@@ -310,6 +338,7 @@ function TimeStep({
   date: Date;
   slot: AvailableSlot | null;
   accent: string;
+  tz?: string;
   onDate: (d: Date) => void;
   onSlot: (s: AvailableSlot) => void;
   onBack: () => void;
@@ -396,7 +425,7 @@ function TimeStep({
                   color: active ? "#fff" : "var(--ink)",
                 }}
               >
-                {new Date(s.slot_start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                {new Date(s.slot_start).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}
               </button>
             );
           })}
@@ -418,6 +447,7 @@ function DetailsStep({
   service,
   slot,
   accent,
+  tz,
   details,
   custom,
   customFields,
@@ -431,6 +461,7 @@ function DetailsStep({
   service: Service;
   slot: AvailableSlot;
   accent: string;
+  tz?: string;
   details: { name: string; email: string; phone: string; address: string; notes: string };
   custom: Record<string, string>;
   customFields: CustomField[];
@@ -454,9 +485,9 @@ function DetailsStep({
       <div className="mb-4 rounded-[12px] border border-line bg-surface-alt/50 px-4 py-3">
         <p className="text-[0.9rem] font-semibold text-ink">{service.name}</p>
         <p className="mt-0.5 text-[0.78rem] text-ink-muted">
-          {new Date(slot.slot_start).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+          {new Date(slot.slot_start).toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })}
           {" · "}
-          {new Date(slot.slot_start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+          {new Date(slot.slot_start).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}
         </p>
         {addonNames.length > 0 && (
           <p className="mt-1 text-[0.72rem] text-ink-faint">+ {addonNames.map((a) => a.name).join(", ")}</p>
@@ -551,12 +582,16 @@ function DoneStep({
   result,
   service,
   accent,
+  tz,
   email,
+  emailWillSend,
 }: {
   result: WidgetBookingResult;
   service: Service;
   accent: string;
+  tz?: string;
   email: string;
+  emailWillSend: boolean;
 }) {
   return (
     <div className="py-4 text-center">
@@ -571,9 +606,9 @@ function DoneStep({
       <p className="mt-4 font-display text-[1.3rem] font-semibold text-ink">You&rsquo;re booked!</p>
       <p className="mt-1.5 text-[0.85rem] text-ink-muted">
         {service.name} on{" "}
-        {new Date(result.starts_at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+        {new Date(result.starts_at).toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })}
         {" at "}
-        {new Date(result.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}.
+        {new Date(result.starts_at).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}.
       </p>
       <div className="mt-5 rounded-[12px] border border-line bg-surface-alt/50 px-4 py-3 text-left">
         <Row label="Confirmation" value={result.status === "confirmed" ? "Confirmed" : "Pending review"} />
@@ -581,7 +616,14 @@ function DoneStep({
         {result.deposit_cents > 0 && <Row label="Deposit due" value={money(result.deposit_cents)} />}
       </div>
       <p className="mt-4 text-[0.8rem] text-ink-faint">
-        A confirmation has been sent to <span className="font-semibold text-ink-muted">{email}</span>.
+        {emailWillSend ? (
+          <>
+            A confirmation has been sent to{" "}
+            <span className="font-semibold text-ink-muted">{email}</span>.
+          </>
+        ) : (
+          <>Please save these details for your records.</>
+        )}
       </p>
     </div>
   );

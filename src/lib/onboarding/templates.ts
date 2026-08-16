@@ -4,6 +4,12 @@
  * offered on the signup form.
  */
 
+export interface ServiceTemplateAddon {
+  name: string;
+  price_cents: number;
+  duration_minutes: number;
+}
+
 export interface ServiceTemplate {
   name: string;
   category: string;
@@ -12,13 +18,21 @@ export interface ServiceTemplate {
   deposit_cents: number;
   buffer_before_minutes: number;
   buffer_after_minutes: number;
+  addons?: ServiceTemplateAddon[];
 }
+
+const CLEANING_ADDONS: ServiceTemplateAddon[] = [
+  { name: "Inside fridge", price_cents: 2500, duration_minutes: 30 },
+  { name: "Inside oven", price_cents: 2500, duration_minutes: 30 },
+  { name: "Interior windows", price_cents: 3500, duration_minutes: 45 },
+  { name: "Blinds", price_cents: 2000, duration_minutes: 30 },
+];
 
 export const SERVICE_TEMPLATES: Record<string, ServiceTemplate[]> = {
   Cleaning: [
-    { name: "Standard Home Cleaning", category: "Residential", duration_minutes: 120, price_cents: 12000, deposit_cents: 0, buffer_before_minutes: 0, buffer_after_minutes: 30 },
-    { name: "Deep Cleaning", category: "Residential", duration_minutes: 240, price_cents: 24000, deposit_cents: 5000, buffer_before_minutes: 0, buffer_after_minutes: 30 },
-    { name: "Move-In / Move-Out Clean", category: "Residential", duration_minutes: 300, price_cents: 32000, deposit_cents: 5000, buffer_before_minutes: 0, buffer_after_minutes: 30 },
+    { name: "Standard Home Cleaning", category: "Residential", duration_minutes: 120, price_cents: 12000, deposit_cents: 0, buffer_before_minutes: 0, buffer_after_minutes: 30, addons: CLEANING_ADDONS },
+    { name: "Deep Cleaning", category: "Residential", duration_minutes: 240, price_cents: 24000, deposit_cents: 5000, buffer_before_minutes: 0, buffer_after_minutes: 30, addons: CLEANING_ADDONS },
+    { name: "Move-In / Move-Out Clean", category: "Residential", duration_minutes: 300, price_cents: 32000, deposit_cents: 5000, buffer_before_minutes: 0, buffer_after_minutes: 30, addons: CLEANING_ADDONS },
     { name: "Office Cleaning", category: "Commercial", duration_minutes: 90, price_cents: 15000, deposit_cents: 0, buffer_before_minutes: 0, buffer_after_minutes: 15 },
   ],
   HVAC: [

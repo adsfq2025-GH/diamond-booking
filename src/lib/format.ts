@@ -43,11 +43,67 @@ export function signedPercent(fraction: number, digits = 1): string {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** "Aug 15", or "Aug 15, 2026" when the year differs from `ref`. */
-export function shortDate(iso: string | Date, ref = new Date()): string {
+/**
+ * Timezone handling — IMPORTANT.
+ *
+ * Bookings are stored as absolute instants (timestamptz). The *displayed* wall
+ * clock must always be the business's timezone, not the server's (UTC on
+ * Vercel) or the viewer's browser. Every formatter below takes an optional
+ * `tz` (an IANA name like "America/Los_Angeles"); pass the tenant timezone so
+ * server-rendered and client-rendered views agree. Omitting `tz` falls back to
+ * the ambient zone (fine for demo/mock data).
+ */
+
+/** Wall-clock parts of an instant in a given timezone. */
+export function zonedParts(
+  iso: string | Date,
+  tz?: string,
+): { year: number; month: number; day: number; hour: number; minute: number } {
   const d = typeof iso === "string" ? new Date(iso) : iso;
-  const sameYear = d.getFullYear() === ref.getFullYear();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  const hour = get("hour");
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: hour === 24 ? 0 : hour,
+    minute: get("minute"),
+  };
+}
+
+/** 'YYYY-MM-DD' for the instant in `tz` (for grouping events by calendar day). */
+export function zonedYmd(iso: string | Date, tz?: string): string {
+  const p = zonedParts(iso, tz);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
+}
+
+/** Hours-since-midnight (e.g. 9.5 for 9:30) in `tz` — for calendar positioning. */
+export function zonedHourFraction(iso: string | Date, tz?: string): number {
+  const p = zonedParts(iso, tz);
+  return p.hour + p.minute / 60;
+}
+
+/** Integer day index in `tz`, for day-difference math. */
+function zonedDayIndex(iso: string | Date, tz?: string): number {
+  const p = zonedParts(iso, tz);
+  return Math.round(Date.UTC(p.year, p.month - 1, p.day) / DAY_MS);
+}
+
+/** "Aug 15", or "Aug 15, 2026" when the year differs from `ref`. */
+export function shortDate(iso: string | Date, tz?: string, ref = new Date()): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const sameYear = zonedParts(d, tz).year === zonedParts(ref, tz).year;
   return d.toLocaleDateString("en-US", {
+    timeZone: tz,
     month: "short",
     day: "numeric",
     year: sameYear ? undefined : "numeric",
@@ -55,38 +111,35 @@ export function shortDate(iso: string | Date, ref = new Date()): string {
 }
 
 /** "9:00 AM". */
-export function timeOfDay(iso: string | Date): string {
+export function timeOfDay(iso: string | Date, tz?: string): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
-  return d
-    .toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    })
-    .replace(":00", ":00");
+  return d.toLocaleTimeString("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** "9:00 – 11:00 AM" for a start/end pair on the same day. */
-export function timeRange(startIso: string, endIso: string): string {
+export function timeRange(startIso: string, endIso: string, tz?: string): string {
   const start = new Date(startIso);
   const end = new Date(endIso);
-  const startMeridiem = start.getHours() >= 12 ? "PM" : "AM";
-  const endMeridiem = end.getHours() >= 12 ? "PM" : "AM";
+  const startPm = zonedParts(start, tz).hour >= 12;
+  const endPm = zonedParts(end, tz).hour >= 12;
   const fmt = (d: Date, withMeridiem: boolean) => {
     const s = d.toLocaleTimeString("en-US", {
+      timeZone: tz,
       hour: "numeric",
       minute: "2-digit",
     });
     return withMeridiem ? s : s.replace(/\s?[AP]M$/, "");
   };
-  return `${fmt(start, startMeridiem !== endMeridiem)} – ${fmt(end, true)}`;
+  return `${fmt(start, startPm !== endPm)} – ${fmt(end, true)}`;
 }
 
 /** Human relative label: "Today", "Tomorrow", "In 3 days", "5 days ago". */
-export function relativeDay(iso: string | Date, ref = new Date()): string {
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  const startOf = (x: Date) =>
-    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((startOf(d) - startOf(ref)) / DAY_MS);
+export function relativeDay(iso: string | Date, tz?: string, ref = new Date()): string {
+  const diffDays = zonedDayIndex(iso, tz) - zonedDayIndex(ref, tz);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Tomorrow";
   if (diffDays === -1) return "Yesterday";

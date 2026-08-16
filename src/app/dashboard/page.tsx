@@ -68,6 +68,7 @@ export default async function OverviewPage() {
         <div>
           <p className="text-[0.82rem] font-medium text-ink-faint">
             {new Date().toLocaleDateString("en-US", {
+              timeZone: context.timezone,
               weekday: "long",
               month: "long",
               day: "numeric",
@@ -194,10 +195,10 @@ export default async function OverviewPage() {
                     </div>
                     <div className="flex-none text-right">
                       <p className="text-[0.8rem] font-semibold text-ink">
-                        {relativeDay(job.startsAt)}
+                        {relativeDay(job.startsAt, context.timezone)}
                       </p>
                       <p className="mt-0.5 text-[0.73rem] text-ink-faint">
-                        {timeRange(job.startsAt, job.endsAt)}
+                        {timeRange(job.startsAt, job.endsAt, context.timezone)}
                       </p>
                     </div>
                   </li>
@@ -270,7 +271,7 @@ export default async function OverviewPage() {
                       </p>
                     </div>
                     <span className="flex-none text-[0.72rem] text-ink-faint">
-                      {relativeDay(item.at)}
+                      {relativeDay(item.at, context.timezone)}
                     </span>
                   </li>
                 );

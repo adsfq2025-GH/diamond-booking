@@ -63,6 +63,7 @@ export default async function OnboardingPage({
   const [
     { data: tenant },
     { data: services },
+    { data: addons },
     { data: employees },
     { data: hours },
     { data: widget },
@@ -73,6 +74,7 @@ export default async function OnboardingPage({
       .select("*")
       .eq("tenant_id", tenantId)
       .order("sort"),
+    supabase.from("service_addons").select("*").eq("tenant_id", tenantId),
     supabase.from("employees").select("*").eq("tenant_id", tenantId),
     supabase.from("business_hours").select("*").eq("tenant_id", tenantId),
     supabase
@@ -122,6 +124,14 @@ export default async function OnboardingPage({
       deposit_cents: s.deposit_cents,
       buffer_before_minutes: s.buffer_before_minutes,
       buffer_after_minutes: s.buffer_after_minutes,
+      addons: (addons ?? [])
+        .filter((a) => a.service_id === s.id)
+        .map((a) => ({
+          localId: a.id,
+          name: a.name,
+          price_cents: a.price_cents,
+          duration_minutes: a.duration_minutes,
+        })),
     })),
     team: {
       ownerBookable: Boolean(ownerRow),

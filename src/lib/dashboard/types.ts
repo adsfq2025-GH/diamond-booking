@@ -12,6 +12,8 @@ export interface DashboardContext {
   ownerName: string;
   ownerEmail: string;
   plan: PlanTier;
+  /** IANA timezone (e.g. "America/Los_Angeles"). All booking times render in it. */
+  timezone: string;
   onboardingComplete: boolean;
   trialDaysLeft: number | null;
   /** Unread count for the topbar bell. */

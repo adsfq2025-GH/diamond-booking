@@ -121,7 +121,9 @@ export async function saveServices(
     }
 
     // Pre-launch reconcile: replace the tenant's catalog wholesale. Safe
-    // during onboarding (no bookings can reference these rows yet).
+    // during onboarding (no bookings can reference these rows yet). Delete
+    // add-ons first (they reference services).
+    await ctx.supabase.from("service_addons").delete().eq("tenant_id", ctx.tenantId);
     const { error: deleteError } = await ctx.supabase
       .from("services")
       .delete()
@@ -145,6 +147,30 @@ export async function saveServices(
       .insert(rows)
       .select("id");
     if (insertError || !inserted) throw insertError ?? new Error("insert failed");
+
+    // Insert add-ons per service (inserted[] is parallel to clean[]).
+    const addonRows: TablesInsert<"service_addons">[] = [];
+    clean.forEach((s, i) => {
+      const serviceId = inserted[i]?.id;
+      if (!serviceId) return;
+      for (const a of s.addons ?? []) {
+        const name = a.name.trim();
+        if (!name) continue;
+        addonRows.push({
+          tenant_id: ctx.tenantId,
+          service_id: serviceId,
+          name,
+          price_cents: Math.max(0, Math.round(a.price_cents) || 0),
+          duration_minutes: Math.max(0, Math.round(a.duration_minutes) || 0),
+        });
+      }
+    });
+    if (addonRows.length > 0) {
+      const { error: addonError } = await ctx.supabase
+        .from("service_addons")
+        .insert(addonRows);
+      if (addonError) throw addonError;
+    }
 
     await mergeSettings(ctx, {}, 3);
     return { ok: true, ids: inserted.map((r) => r.id) };

@@ -33,9 +33,11 @@ const TAB_LABEL: Record<Tab, string> = {
 
 export function BookingsClient({
   data,
+  timezone,
   preview,
 }: {
   data: BookingsData;
+  timezone: string;
   preview: boolean;
 }) {
   const [rows, setRows] = useState(data.bookings);
@@ -118,9 +120,9 @@ export function BookingsClient({
                     </div>
                   </Td>
                   <Td>
-                    <div className="text-[0.82rem] text-ink">{shortDate(b.startsAt)}</div>
+                    <div className="text-[0.82rem] text-ink">{shortDate(b.startsAt, timezone)}</div>
                     <div className="text-[0.72rem] text-ink-faint">
-                      {timeRange(b.startsAt, b.endsAt)}
+                      {timeRange(b.startsAt, b.endsAt, timezone)}
                     </div>
                   </Td>
                   <Td className="text-right font-instrument font-semibold">{money(b.priceCents)}</Td>
@@ -141,14 +143,14 @@ export function BookingsClient({
           title={selected.customerName}
           footer={<StatusActions booking={selected} onSet={setStatus} />}
         >
-          <BookingDetail b={selected} />
+          <BookingDetail b={selected} timezone={timezone} />
         </Sheet>
       )}
     </div>
   );
 }
 
-function BookingDetail({ b }: { b: BookingView }) {
+function BookingDetail({ b, timezone }: { b: BookingView; timezone: string }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -159,7 +161,7 @@ function BookingDetail({ b }: { b: BookingView }) {
       <div className="rounded-[14px] border border-line bg-surface-alt/40 p-4">
         <p className="font-display text-[1.05rem] font-semibold text-ink">{b.serviceName}</p>
         <p className="mt-1 text-[0.82rem] text-ink-muted">
-          {shortDate(b.startsAt)} · {timeRange(b.startsAt, b.endsAt)}
+          {shortDate(b.startsAt, timezone)} · {timeRange(b.startsAt, b.endsAt, timezone)}
         </p>
       </div>
 

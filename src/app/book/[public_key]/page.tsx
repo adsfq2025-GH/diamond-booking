@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getWidgetConfig } from "@/lib/widget/data";
+import { emailConfigured } from "@/lib/integrations/email";
 import { BookingFlow } from "@/components/widget/BookingFlow";
 
 export const metadata: Metadata = {
@@ -30,7 +31,12 @@ export default async function BookPage({
           : "flex min-h-dvh w-full items-center justify-center bg-surface-alt px-4 py-10"
       }
     >
-      <BookingFlow publicKey={public_key} config={config} embedded={embedded} />
+      <BookingFlow
+        publicKey={public_key}
+        config={config}
+        embedded={embedded}
+        emailWillSend={emailConfigured()}
+      />
     </main>
   );
 }

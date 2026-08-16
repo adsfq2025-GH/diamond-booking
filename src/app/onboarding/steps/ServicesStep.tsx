@@ -5,13 +5,17 @@ import { Em } from "@/components/ui/SectionHeading";
 import { Label, inputBase } from "@/components/ui/Field";
 import { StepHeader, StepFooter, GhostButton, WizardError } from "../wizard-ui";
 import { templatesForIndustry } from "@/lib/onboarding/templates";
-import type { ServiceInput } from "@/lib/onboarding/types";
+import type { ServiceInput, ServiceAddonInput } from "@/lib/onboarding/types";
 import { cn } from "@/lib/cn";
 
 let localSeq = 0;
 function nextLocalId() {
   localSeq += 1;
   return `svc-${Date.now()}-${localSeq}`;
+}
+function nextAddonId() {
+  localSeq += 1;
+  return `addon-${Date.now()}-${localSeq}`;
 }
 
 function blankService(): ServiceInput {
@@ -24,7 +28,12 @@ function blankService(): ServiceInput {
     deposit_cents: 0,
     buffer_before_minutes: 0,
     buffer_after_minutes: 15,
+    addons: [],
   };
+}
+
+function blankAddon(): ServiceAddonInput {
+  return { localId: nextAddonId(), name: "", price_cents: 0, duration_minutes: 0 };
 }
 
 function formatDuration(minutes: number): string {
@@ -79,6 +88,12 @@ export function ServicesStep({
         deposit_cents: t.deposit_cents,
         buffer_before_minutes: t.buffer_before_minutes,
         buffer_after_minutes: t.buffer_after_minutes,
+        addons: (t.addons ?? []).map((a) => ({
+          localId: nextAddonId(),
+          name: a.name,
+          price_cents: a.price_cents,
+          duration_minutes: a.duration_minutes,
+        })),
       },
     ]);
     setError(null);
@@ -92,6 +107,36 @@ export function ServicesStep({
 
   const remove = (localId: string) => {
     setServices((list) => list.filter((s) => s.localId !== localId));
+  };
+
+  const addAddon = (serviceId: string) => {
+    setServices((list) =>
+      list.map((s) =>
+        s.localId === serviceId ? { ...s, addons: [...s.addons, blankAddon()] } : s,
+      ),
+    );
+  };
+  const updateAddon = (
+    serviceId: string,
+    addonId: string,
+    patch: Partial<ServiceAddonInput>,
+  ) => {
+    setServices((list) =>
+      list.map((s) =>
+        s.localId === serviceId
+          ? { ...s, addons: s.addons.map((a) => (a.localId === addonId ? { ...a, ...patch } : a)) }
+          : s,
+      ),
+    );
+  };
+  const removeAddon = (serviceId: string, addonId: string) => {
+    setServices((list) =>
+      list.map((s) =>
+        s.localId === serviceId
+          ? { ...s, addons: s.addons.filter((a) => a.localId !== addonId) }
+          : s,
+      ),
+    );
   };
 
   const submit = (e: React.FormEvent) => {
@@ -300,6 +345,68 @@ export function ServicesStep({
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Add-ons — optional extras customers can tack on when booking */}
+            <div className="mt-4 border-t border-line pt-4">
+              <p className="mb-2.5 text-[0.78rem] font-semibold text-ink">
+                Add-ons{" "}
+                <span className="font-normal text-ink-faint">
+                  — optional extras (e.g. inside fridge, oven, blinds)
+                </span>
+              </p>
+              {s.addons.length > 0 && (
+                <div className="mb-2.5 flex flex-col gap-2">
+                  {s.addons.map((a) => (
+                    <div key={a.localId} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Inside fridge"
+                        value={a.name}
+                        onChange={(e) =>
+                          updateAddon(s.localId, a.localId, { name: e.target.value })
+                        }
+                        className={cn(inputBase, "flex-1")}
+                        aria-label="Add-on name"
+                      />
+                      <div className="relative w-[104px] flex-none">
+                        <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[0.85rem] text-ink-faint">
+                          $
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          placeholder="0"
+                          value={a.price_cents ? a.price_cents / 100 : ""}
+                          onChange={(e) =>
+                            updateAddon(s.localId, a.localId, {
+                              price_cents: dollarsToCents(e.target.value),
+                            })
+                          }
+                          className={cn(inputBase, "pl-7")}
+                          aria-label="Add-on price"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeAddon(s.localId, a.localId)}
+                        aria-label="Remove add-on"
+                        className="flex-none cursor-pointer rounded-[8px] px-2.5 py-2 text-[0.85rem] text-ink-faint transition-colors hover:bg-[#fdf6f5] hover:text-[#a63d39]"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => addAddon(s.localId)}
+                className="cursor-pointer text-[0.82rem] font-semibold text-blue-600 transition-colors hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              >
+                + Add an add-on
+              </button>
             </div>
           </div>
         ))}

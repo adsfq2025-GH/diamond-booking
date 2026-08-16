@@ -45,6 +45,7 @@ export const getDashboardContext = cache(
         ownerName: MOCK.ownerName,
         ownerEmail: MOCK.ownerEmail,
         plan: MOCK.plan,
+        timezone: "America/New_York",
         onboardingComplete: true,
         trialDaysLeft: 7,
         notificationCount: 3,
@@ -57,6 +58,7 @@ export const getDashboardContext = cache(
       ownerName: profile?.full_name ?? "there",
       ownerEmail: profile?.email ?? "",
       plan: "starter",
+      timezone: "America/New_York",
       onboardingComplete: false,
       trialDaysLeft: null,
       notificationCount: 0,
@@ -66,7 +68,7 @@ export const getDashboardContext = cache(
     const supabase = await createClient();
     const { data: tenant } = await supabase
       .from("tenants")
-      .select("name, plan, settings, trial_ends_at, subscription_status")
+      .select("name, plan, timezone, settings, trial_ends_at, subscription_status")
       .eq("id", profile.tenant_id)
       .maybeSingle();
     if (!tenant) return base;
@@ -76,6 +78,7 @@ export const getDashboardContext = cache(
       ...base,
       tenantName: tenant.name,
       plan: tenant.plan as PlanTier,
+      timezone: tenant.timezone || "America/New_York",
       onboardingComplete: Boolean(settings.onboarding_complete),
       trialDaysLeft:
         tenant.subscription_status === "trialing"
@@ -762,6 +765,61 @@ export const getWidgetData = cache(async (): Promise<WidgetData> => {
     allowedDomains: domains,
     customFields: fields,
     appUrl,
+  };
+});
+
+// ---------- Business profile (settings) ----------
+
+export interface BusinessProfile {
+  name: string;
+  industry: string;
+  email: string;
+  phone: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  timezone: string;
+}
+
+export const getBusinessProfile = cache(async (): Promise<BusinessProfile> => {
+  const fallback: BusinessProfile = {
+    name: MOCK.tenantName,
+    industry: "Cleaning",
+    email: MOCK.ownerEmail,
+    phone: "",
+    street: "",
+    city: "",
+    state: "",
+    zip: "",
+    timezone: "America/New_York",
+  };
+  if (!supabaseEnvConfigured()) return fallback;
+  const scope = await tenantScope();
+  if (!scope) return fallback;
+  const { supabase, tenantId } = scope;
+  const { data } = await supabase
+    .from("tenants")
+    .select("name, industry, email, phone, address, timezone")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (!data) return fallback;
+  const addr = (data.address ?? {}) as {
+    line1?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
+  return {
+    name: data.name ?? "",
+    industry: data.industry ?? "",
+    email: data.email ?? "",
+    phone: data.phone ?? "",
+    street: addr.line1 ?? "",
+    city: addr.city ?? "",
+    state: addr.state ?? "",
+    zip: addr.zip ?? "",
+    timezone: data.timezone || "America/New_York",
   };
 });
 
