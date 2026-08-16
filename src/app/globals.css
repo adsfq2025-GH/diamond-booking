@@ -1,26 +1,289 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Diamond Booking — Design System Tokens
+   Direction: "Clear Enterprise" (D2) + expressive colored
+   headlines (D3). Light-first marketing surfaces; deep navy as
+   ink and drama; vivid blue for interaction; gold rationed to
+   primary CTAs and one emphasis moment per screen.
+   ============================================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* --- Brand: navy (ink + dark surfaces), from logo wordmark --- */
+  --navy-50: #eef3f7;
+  --navy-100: #dce7ef;
+  --navy-200: #b9cfdf;
+  --navy-300: #8fb0c9;
+  --navy-400: #5a88a8;
+  --navy-500: #2e5f86;
+  --navy-600: #1b4a6b;
+  --navy-700: #143953;
+  --navy-800: #0f2c41;
+  --navy-900: #0c2440;
+
+  /* --- Brand: vivid blue (interactive, gradients, headline emphasis) --- */
+  --blue-50: #ebf5fb;
+  --blue-100: #d6eaf8;
+  --blue-200: #aed6f1;
+  --blue-300: #85c1e9;
+  --blue-400: #5dade2;
+  --blue-500: #3498db;
+  --blue-600: #2e86c1;
+  --blue-700: #2874a6;
+  --blue-800: #21618c;
+  --blue-900: #1b4f72;
+
+  /* --- Brand: gold (primary CTA + rationed micro-accents) --- */
+  --gold-50: #fef9ec;
+  --gold-100: #fcefc7;
+  --gold-300: #f8d97f;
+  --gold-500: #f4b942;   /* CTA fill, large display emphasis on navy */
+  --gold-700: #a8770b;   /* AA-safe gold for text on light surfaces */
+  --gold-900: #6b4c06;
+
+  /* --- Surfaces & ink --- */
+  --surface: #fafbfc;
+  --surface-alt: #f4f7fa;
+  --surface-card: #ffffff;
+  --ink: var(--navy-900);
+  --ink-muted: #4a617a;
+  --ink-faint: #7c8fa3;
+  --line: #e3eaf1;
+
+  /* --- Fluid type scale (marketing) --- */
+  --text-display: clamp(2.75rem, 6.5vw, 5.25rem);
+  --text-h1: clamp(2.25rem, 4.5vw, 3.75rem);
+  --text-h2: clamp(1.75rem, 3vw, 2.625rem);
+  --text-h3: clamp(1.25rem, 1.8vw, 1.5rem);
+  --text-body: clamp(1rem, 1.05vw, 1.125rem);
+  --text-small: 0.875rem;
+  --text-eyebrow: 0.6875rem;
+
+  /* --- Spacing rhythm --- */
+  --space-section: clamp(4.5rem, 9vw, 9rem);
+  --container-max: 1240px;
+  --container-pad: clamp(1.25rem, 4vw, 2rem);
+
+  /* --- Radii --- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  /* --- Shadows (layered lift) --- */
+  --shadow-lift:
+    0 1px 2px rgb(12 36 64 / 0.04),
+    0 6px 18px rgb(12 36 64 / 0.06),
+    0 18px 48px rgb(12 36 64 / 0.07);
+  --shadow-float:
+    0 2px 4px rgb(12 36 64 / 0.06),
+    0 12px 32px rgb(12 36 64 / 0.10),
+    0 32px 80px rgb(12 36 64 / 0.12);
+
+  /* --- Motion --- */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 200ms;
+  --duration-base: 400ms;
+  --duration-slow: 800ms;
+
+  /* --- Extended tokens (approved landing mockup: direction-final) --- */
+  --navy-950: #081a2e;          /* deepest surface (footer, gradient ends) */
+  --gold-400: #f8c55c;          /* gold CTA gradient top */
+  --gold-600: #e3a52c;          /* gold CTA gradient bottom */
+  --success-50: #e4f5ee;        /* "confirmed" pill background */
+  --success-500: #3fb68b;       /* success dot */
+  --success-700: #188a61;       /* success text / positive deltas */
+  --line-strong: #d3dbe2;       /* outline-button border on light */
+
+  /* Bricolage runs wide: approved display/H2 sizes from the mockup */
+  --text-display-tight: clamp(2.25rem, 5.6vw, 4rem);
+  --text-h2-lg: clamp(1.9rem, 3.5vw, 2.9rem);
+
+  /* Gold CTA shadows (rationed to primary buttons) */
+  --shadow-gold:
+    0 1px 2px rgb(8 26 46 / 0.15),
+    0 6px 18px rgb(244 185 66 / 0.35),
+    inset 0 1px 0 rgb(255 255 255 / 0.45);
+  --shadow-gold-hover:
+    0 2px 4px rgb(8 26 46 / 0.15),
+    0 12px 28px rgb(244 185 66 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.45);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-navy-50: var(--navy-50);
+  --color-navy-100: var(--navy-100);
+  --color-navy-200: var(--navy-200);
+  --color-navy-300: var(--navy-300);
+  --color-navy-400: var(--navy-400);
+  --color-navy-500: var(--navy-500);
+  --color-navy-600: var(--navy-600);
+  --color-navy-700: var(--navy-700);
+  --color-navy-800: var(--navy-800);
+  --color-navy-900: var(--navy-900);
+
+  --color-blue-50: var(--blue-50);
+  --color-blue-100: var(--blue-100);
+  --color-blue-200: var(--blue-200);
+  --color-blue-300: var(--blue-300);
+  --color-blue-400: var(--blue-400);
+  --color-blue-500: var(--blue-500);
+  --color-blue-600: var(--blue-600);
+  --color-blue-700: var(--blue-700);
+  --color-blue-800: var(--blue-800);
+  --color-blue-900: var(--blue-900);
+
+  --color-gold-50: var(--gold-50);
+  --color-gold-100: var(--gold-100);
+  --color-gold-300: var(--gold-300);
+  --color-gold-500: var(--gold-500);
+  --color-gold-700: var(--gold-700);
+  --color-gold-900: var(--gold-900);
+
+  --color-navy-950: var(--navy-950);
+  --color-gold-400: var(--gold-400);
+  --color-gold-600: var(--gold-600);
+  --color-success-50: var(--success-50);
+  --color-success-500: var(--success-500);
+  --color-success-700: var(--success-700);
+  --color-line-strong: var(--line-strong);
+
+  --color-surface: var(--surface);
+  --color-surface-alt: var(--surface-alt);
+  --color-card: var(--surface-card);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+
+  --font-display: var(--font-bricolage);
+  --font-body: var(--font-inter);
+  --font-numeric: var(--font-instrument);
+
+  --shadow-lift: var(--shadow-lift);
+  --shadow-float: var(--shadow-float);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* --- Headline emphasis system (from Direction 3) ---
+   Rule: color the emotionally/semantically key word(s) only.
+   Blue = default emphasis on light surfaces.
+   Sky  = emphasis on navy surfaces.
+   Gold = ONE most-important moment per screen; on light surfaces
+          only at display sizes or use --gold-700 for AA. */
+.em-blue { color: var(--blue-600); }
+.em-sky { color: var(--blue-400); }
+.em-gold { color: var(--gold-500); }
+.em-gold-deep { color: var(--gold-700); }
+.em-italic { font-style: italic; }
+
+/* --- Eyebrow label --- */
+.eyebrow {
+  font-size: var(--text-eyebrow);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--blue-600);
+}
+
+/* --- Numeric / stat face (Instrument Sans) --- */
+.font-instrument {
+  font-family: var(--font-instrument), var(--font-inter), system-ui, sans-serif;
+}
+
+/* --- Hero motif: hand-drawn gold underline swash (decorative stroke —
+       lives outside the one-gold-text-moment-per-page budget) --- */
+.gold-draw {
+  position: relative;
+  white-space: nowrap;
+}
+.gold-draw svg {
+  position: absolute;
+  left: -2%;
+  bottom: -0.12em;
+  width: 104%;
+  height: 0.34em;
+  overflow: visible;
+  pointer-events: none;
+}
+.gold-draw svg path {
+  fill: none;
+  stroke: var(--gold-500);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: gold-draw 900ms var(--ease-out-expo) 600ms forwards;
+}
+@keyframes gold-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* --- Hero backdrop: faint dot grid, feathered --- */
+.hero-dots {
+  background-image: radial-gradient(rgb(12 36 64 / 0.055) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(720px 480px at 74% 22%, black 0%, transparent 72%);
+  -webkit-mask-image: radial-gradient(720px 480px at 74% 22%, black 0%, transparent 72%);
+}
+
+/* --- Industry marquee (CSS-driven) --- */
+.marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 36s linear infinite;
+}
+@keyframes marquee-scroll {
+  to { transform: translateX(-50%); }
+}
+
+/* --- Platform emblem video: the mp4 has a near-white baked background;
+       multiply blend melts it into the light section gradient, and an
+       edge-feather mask (~8% per edge) keeps it from reading as a box. --- */
+.orbit-video {
+  mix-blend-mode: multiply;
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent),
+    linear-gradient(180deg, transparent, #000 8%, #000 90%, transparent);
+  -webkit-mask-composite: destination-in;
+  mask-image:
+    linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent),
+    linear-gradient(180deg, transparent, #000 8%, #000 90%, transparent);
+  mask-composite: intersect;
+}
+
+/* --- Reduced motion: decorative animation collapses --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  .gold-draw svg path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .marquee-track {
+    animation: none;
+  }
 }
