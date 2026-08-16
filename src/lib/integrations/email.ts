@@ -1,12 +1,15 @@
 import "server-only";
 import { Resend } from "resend";
+import nodemailer from "nodemailer";
+import { createAdminClient } from "@/lib/supabase/server";
 
 /**
- * Transactional email via Resend. Behind RESEND_API_KEY + RESEND_FROM_EMAIL:
- * when unset, send() is a no-op that returns { ok:false, skipped:true } so
- * calling code never crashes in environments without email configured.
- * Templates are inline, on-brand (navy + gold), and plain enough to render
- * everywhere.
+ * Transactional email. Two ways to connect, checked per booking in this order:
+ *   1. The tenant's own SMTP settings (Settings → Integrations → Email) — lets
+ *      each business send from their own Gmail / provider.
+ *   2. A platform-wide Resend key (RESEND_API_KEY + RESEND_FROM_EMAIL).
+ * If neither is set, sends are a graceful no-op (never throws). Templates are
+ * inline and on-brand.
  */
 
 export function emailConfigured(): boolean {
@@ -24,7 +27,93 @@ type SendResult =
   | { ok: true; id: string | null }
   | { ok: false; skipped?: boolean; error: string };
 
-async function send(to: string, subject: string, html: string): Promise<SendResult> {
+// ---------- per-tenant SMTP ----------
+
+/** Stored in tenant.settings.email. The password is server-only, never sent to the client. */
+export interface TenantSmtp {
+  host: string;
+  port: number;
+  secure: boolean; // true for 465; false for 587/STARTTLS
+  user: string;
+  pass: string;
+  fromName: string;
+  fromEmail: string;
+}
+export interface TenantEmailConfig {
+  provider?: "smtp" | "resend" | "off";
+  smtp?: Partial<TenantSmtp>;
+}
+
+function smtpComplete(s?: Partial<TenantSmtp>): s is TenantSmtp {
+  return Boolean(s?.host && s?.port && s?.user && s?.pass && s?.fromEmail);
+}
+
+async function sendViaSmtp(
+  s: TenantSmtp,
+  to: string,
+  subject: string,
+  html: string,
+): Promise<SendResult> {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: s.host,
+      port: s.port,
+      secure: s.secure,
+      auth: { user: s.user, pass: s.pass },
+    });
+    const info = await transporter.sendMail({
+      from: s.fromName ? `${s.fromName} <${s.fromEmail}>` : s.fromEmail,
+      to,
+      subject,
+      html,
+    });
+    return { ok: true, id: info.messageId ?? null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "SMTP error" };
+  }
+}
+
+/** Read a tenant's stored email config (server-only; uses the service role). */
+async function readTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig | null> {
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin.from("tenants").select("settings").eq("id", tenantId).maybeSingle();
+    const settings = (data?.settings ?? {}) as { email?: TenantEmailConfig };
+    return settings.email ?? null;
+  } catch {
+    return null; // no service-role key configured
+  }
+}
+
+/** Look up a tenant id from a widget public key (service role). */
+async function tenantIdForKey(publicKey: string): Promise<string | null> {
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("widget_configs")
+      .select("tenant_id")
+      .eq("public_key", publicKey)
+      .maybeSingle();
+    return data?.tenant_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Core dispatch: tenant SMTP first, then platform Resend, else no-op. */
+async function send(
+  to: string,
+  subject: string,
+  html: string,
+  tenantId?: string,
+): Promise<SendResult> {
+  if (tenantId) {
+    const cfg = await readTenantEmailConfig(tenantId);
+    if (cfg?.provider === "off") return { ok: false, skipped: true, error: "Email disabled" };
+    if (cfg?.provider === "smtp" && smtpComplete(cfg.smtp)) {
+      return sendViaSmtp(cfg.smtp, to, subject, html);
+    }
+  }
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: "Email not configured" };
   try {
@@ -39,6 +128,32 @@ async function send(to: string, subject: string, html: string): Promise<SendResu
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Email error" };
   }
+}
+
+/** True if this tenant will actually deliver email (SMTP set, or platform Resend). */
+export async function tenantEmailWillSend(tenantId: string | null): Promise<boolean> {
+  if (tenantId) {
+    const cfg = await readTenantEmailConfig(tenantId);
+    if (cfg?.provider === "off") return false;
+    if (cfg?.provider === "smtp" && smtpComplete(cfg.smtp)) return true;
+  }
+  return emailConfigured();
+}
+
+/** Same, but resolves the tenant from a widget public key (for the booking page). */
+export async function emailWillSendForKey(publicKey: string): Promise<boolean> {
+  const tenantId = await tenantIdForKey(publicKey);
+  return tenantEmailWillSend(tenantId);
+}
+
+/** Send a test email to verify SMTP settings (used by the settings UI). */
+export async function sendTestEmail(tenantId: string, to: string): Promise<SendResult> {
+  const html = shell(
+    "Diamond Booking",
+    "Test email",
+    `<p style="margin:0;font-size:15px">Your email is connected. Booking confirmations and reminders will send from here.</p>`,
+  );
+  return send(to, "Diamond Booking — test email", html, tenantId);
 }
 
 // ---------- templates ----------
@@ -110,14 +225,29 @@ export function bookingReminderEmail(d: BookingEmailData): { subject: string; ht
   };
 }
 
-export async function sendBookingConfirmation(d: BookingEmailData): Promise<SendResult> {
+export async function sendBookingConfirmation(
+  d: BookingEmailData,
+  tenantId?: string,
+): Promise<SendResult> {
   const { subject, html } = bookingConfirmationEmail(d);
-  return send(d.customerEmail, subject, html);
+  return send(d.customerEmail, subject, html, tenantId);
 }
 
-export async function sendBookingReminder(d: BookingEmailData): Promise<SendResult> {
+export async function sendBookingReminder(
+  d: BookingEmailData,
+  tenantId?: string,
+): Promise<SendResult> {
   const { subject, html } = bookingReminderEmail(d);
-  return send(d.customerEmail, subject, html);
+  return send(d.customerEmail, subject, html, tenantId);
+}
+
+/** Confirmation for a widget booking — resolves the tenant from the public key. */
+export async function sendBookingConfirmationForKey(
+  publicKey: string,
+  d: BookingEmailData,
+): Promise<SendResult> {
+  const tenantId = await tenantIdForKey(publicKey);
+  return sendBookingConfirmation(d, tenantId ?? undefined);
 }
 
 function escapeHtml(s: string): string {

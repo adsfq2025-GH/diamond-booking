@@ -10,7 +10,7 @@ import { supabaseEnvConfigured } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { getMockServices } from "@/lib/dashboard/mock-data";
 import { MOCK } from "@/lib/dashboard/mock";
-import { sendBookingConfirmation } from "@/lib/integrations/email";
+import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
 import type {
   AvailableSlot,
   WidgetConfigPayload,
@@ -190,10 +190,10 @@ export async function createWidgetBooking(
   }
   const result = data as unknown as WidgetBookingResult;
 
-  // Fire-and-forget confirmation email (no-op if Resend isn't configured).
+  // Fire-and-forget confirmation email (tenant SMTP → platform Resend → no-op).
   if (cfg && svc) {
     const start = new Date(result.starts_at);
-    void sendBookingConfirmation({
+    void sendBookingConfirmationForKey(input.publicKey, {
       businessName: cfg.tenant.name,
       customerName: input.customerName,
       customerEmail: input.customerEmail,

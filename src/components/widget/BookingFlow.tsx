@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { money } from "@/lib/format";
 import { fetchSlots, submitBooking } from "@/lib/actions/widget";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import type {
   AvailableSlot,
   WidgetBookingResult,
@@ -474,7 +475,15 @@ function DetailsStep({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const valid = details.name.trim() && /.+@.+\..+/.test(details.email);
+  const requiredCustomOk = customFields
+    .filter((f) => f.required)
+    .every((f) => (custom[f.key] ?? "").trim().length > 0);
+  const valid =
+    details.name.trim() &&
+    /.+@.+\..+/.test(details.email) &&
+    details.phone.trim().length > 0 &&
+    details.address.trim().length > 0 &&
+    requiredCustomOk;
 
   const input =
     "w-full rounded-[10px] border border-line-strong bg-card px-3.5 py-2.5 text-[0.88rem] text-ink placeholder:text-ink-faint/80 focus:outline-none";
@@ -514,16 +523,18 @@ function DetailsStep({
         <input
           className={input}
           style={focusRing(accent)}
-          placeholder="Phone"
+          type="tel"
+          placeholder="Phone *"
           value={details.phone}
           onChange={(e) => onChange({ ...details, phone: e.target.value })}
         />
-        <input
-          className={input}
-          style={focusRing(accent)}
-          placeholder="Service address"
+        <AddressAutocomplete
           value={details.address}
-          onChange={(e) => onChange({ ...details, address: e.target.value })}
+          onChange={(v) => onChange({ ...details, address: v })}
+          placeholder="Service address *"
+          inputClassName={input}
+          inputStyle={focusRing(accent)}
+          ariaLabel="Service address"
         />
         {customFields.map((f) => (
           <input

@@ -823,5 +823,56 @@ export const getBusinessProfile = cache(async (): Promise<BusinessProfile> => {
   };
 });
 
+// ---------- Email settings (Settings → Integrations) ----------
+
+export interface EmailSettingsView {
+  provider: "smtp" | "resend" | "off";
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  fromName: string;
+  fromEmail: string;
+  /** True if a password is already saved (we never send it to the client). */
+  hasPassword: boolean;
+  /** True if a platform-wide Resend key is configured as a fallback. */
+  resendAvailable: boolean;
+}
+
+export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
+  const resendAvailable = Boolean(
+    process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL,
+  );
+  const base: EmailSettingsView = {
+    provider: resendAvailable ? "resend" : "off",
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    user: "",
+    fromName: MOCK.tenantName,
+    fromEmail: "",
+    hasPassword: false,
+    resendAvailable,
+  };
+  if (!supabaseEnvConfigured()) return base;
+  const scope = await tenantScope();
+  if (!scope) return base;
+  const { supabase, tenantId } = scope;
+  const { data } = await supabase.from("tenants").select("settings, name").eq("id", tenantId).maybeSingle();
+  const email = ((data?.settings ?? {}) as { email?: Record<string, unknown> }).email;
+  const smtp = (email?.smtp ?? {}) as Record<string, unknown>;
+  return {
+    provider: (email?.provider as EmailSettingsView["provider"]) ?? (resendAvailable ? "resend" : "off"),
+    host: (smtp.host as string) || "smtp.gmail.com",
+    port: (smtp.port as number) || 587,
+    secure: Boolean(smtp.secure),
+    user: (smtp.user as string) || "",
+    fromName: (smtp.fromName as string) || data?.name || "",
+    fromEmail: (smtp.fromEmail as string) || "",
+    hasPassword: Boolean(smtp.pass),
+    resendAvailable,
+  };
+});
+
 // re-exported for pages that want the same formatters
 export { money, moneyCompact, percent, signedPercent };

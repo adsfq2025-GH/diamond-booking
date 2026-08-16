@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getWidgetConfig } from "@/lib/widget/data";
-import { emailConfigured } from "@/lib/integrations/email";
+import { emailWillSendForKey } from "@/lib/integrations/email";
 import { BookingFlow } from "@/components/widget/BookingFlow";
 
 export const metadata: Metadata = {
@@ -22,6 +22,7 @@ export default async function BookPage({
 
   const config = await getWidgetConfig(public_key);
   if (!config) notFound();
+  const emailWillSend = await emailWillSendForKey(public_key);
 
   return (
     <main
@@ -35,7 +36,7 @@ export default async function BookPage({
         publicKey={public_key}
         config={config}
         embedded={embedded}
-        emailWillSend={emailConfigured()}
+        emailWillSend={emailWillSend}
       />
     </main>
   );

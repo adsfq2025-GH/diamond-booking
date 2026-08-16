@@ -10,6 +10,7 @@ import {
   inputInvalid,
 } from "@/components/ui/Field";
 import { StepHeader, StepFooter } from "../wizard-ui";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import {
   COMMON_TIMEZONES,
   type BusinessInfoInput,
@@ -198,14 +199,18 @@ export function BusinessStep({
           <Label htmlFor="biz-street" hint="Optional">
             Street address
           </Label>
-          <input
+          <AddressAutocomplete
             id="biz-street"
-            type="text"
-            autoComplete="street-address"
-            placeholder="482 Maple Ave"
             value={draft.street}
-            onChange={(e) => set("street", e.target.value)}
-            className={inputBase}
+            onChange={(v) => set("street", v)}
+            onSelect={(p) => {
+              set("street", p.line1 || p.formatted);
+              if (p.city) set("city", p.city);
+              if (p.state) set("state", p.state);
+              if (p.zip) set("zip", p.zip);
+            }}
+            placeholder="Start typing an address…"
+            inputClassName={inputBase}
           />
         </div>
 

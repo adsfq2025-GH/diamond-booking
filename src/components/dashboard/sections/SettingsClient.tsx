@@ -4,14 +4,15 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { PLANS, PLAN_ORDER } from "@/lib/plans";
 import { openBillingPortal, startCheckout } from "@/lib/actions/billing";
-import { saveBusinessProfile } from "@/lib/actions/settings";
+import { saveBusinessProfile, saveEmailSettings, testEmailSettings } from "@/lib/actions/settings";
 import { COMMON_TIMEZONES } from "@/lib/onboarding/types";
-import type { BusinessProfile } from "@/lib/dashboard/data";
+import type { BusinessProfile, EmailSettingsView } from "@/lib/dashboard/data";
 import type { PlanTier } from "@/types/database";
 import { Icon, type IconName } from "../icons";
 import { Panel, PanelHeader } from "../ui";
 import { Toggle } from "@/app/onboarding/wizard-ui";
 import { inputBase, Label, SelectShell } from "@/components/ui/Field";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { ActionButton, GhostBtn, PreviewNotice } from "./shared";
 
 type TabKey = "profile" | "notifications" | "integrations" | "security" | "team" | "billing";
@@ -34,11 +35,13 @@ export interface IntegrationFlags {
 
 export function SettingsClient({
   profile,
+  email,
   plan,
   preview,
   integrations,
 }: {
   profile: BusinessProfile;
+  email: EmailSettingsView;
   plan: PlanTier;
   preview: boolean;
   integrations: IntegrationFlags;
@@ -90,7 +93,7 @@ export function SettingsClient({
         <div>
           {tab === "profile" && <ProfileTab profile={profile} preview={preview} />}
           {tab === "notifications" && <NotificationsTab plan={plan} />}
-          {tab === "integrations" && <IntegrationsTab flags={integrations} />}
+          {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} preview={preview} />}
           {tab === "security" && <SecurityTab />}
           {tab === "team" && <TeamPermissionsTab />}
           {tab === "billing" && <BillingTab plan={plan} />}
@@ -148,7 +151,25 @@ function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: b
           <TSelect label="Industry" value={form.industry} options={industries} onChange={(v) => set("industry", v)} />
           <TField label="Contact email" type="email" value={form.email} onChange={(v) => set("email", v)} />
           <TField label="Phone" value={form.phone} onChange={(v) => set("phone", v)} />
-          <TField label="Street address" value={form.street} onChange={(v) => set("street", v)} className="sm:col-span-2" />
+          <div className="sm:col-span-2">
+            <Label htmlFor="f-street">Street address</Label>
+            <AddressAutocomplete
+              id="f-street"
+              value={form.street}
+              onChange={(v) => set("street", v)}
+              onSelect={(p) =>
+                setForm((prev) => ({
+                  ...prev,
+                  street: p.line1 || p.formatted,
+                  city: p.city || prev.city,
+                  state: p.state || prev.state,
+                  zip: p.zip || prev.zip,
+                }))
+              }
+              placeholder="Start typing an address…"
+              inputClassName={inputBase}
+            />
+          </div>
           <TField label="City" value={form.city} onChange={(v) => set("city", v)} />
           <TField label="State" value={form.state} onChange={(v) => set("state", v)} />
           <TField label="ZIP" value={form.zip} onChange={(v) => set("zip", v)} />
@@ -189,15 +210,24 @@ function NotificationsTab({ plan }: { plan: PlanTier }) {
   );
 }
 
-function IntegrationsTab({ flags }: { flags: IntegrationFlags }) {
+function IntegrationsTab({
+  flags,
+  email,
+  preview,
+}: {
+  flags: IntegrationFlags;
+  email: EmailSettingsView;
+  preview: boolean;
+}) {
   const items = [
     { name: "Stripe", desc: "Accept deposits and card payments.", icon: "payments" as IconName, connected: flags.stripe, comingSoon: false },
-    { name: "Resend", desc: "Send branded confirmation & reminder emails.", icon: "invoices" as IconName, connected: flags.resend, comingSoon: false },
     { name: "Twilio", desc: "SMS reminders for appointments.", icon: "bell" as IconName, connected: flags.twilio, comingSoon: false },
     { name: "Google Calendar", desc: "Two-way sync with your team's calendars.", icon: "calendar" as IconName, connected: flags.googleCalendar, comingSoon: true },
   ];
   return (
-    <Panel>
+    <div className="space-y-5">
+      <EmailPanel email={email} preview={preview} />
+      <Panel>
       <PanelHeader title="Integrations" caption="Connect the tools that power payments and messaging" />
       <ul className="divide-y divide-line">
         {items.map((it) => (
@@ -226,6 +256,160 @@ function IntegrationsTab({ flags }: { flags: IntegrationFlags }) {
           </li>
         ))}
       </ul>
+      </Panel>
+    </div>
+  );
+}
+
+function EmailPanel({ email, preview }: { email: EmailSettingsView; preview: boolean }) {
+  const [provider, setProvider] = useState<EmailSettingsView["provider"]>(email.provider);
+  const [form, setForm] = useState({
+    host: email.host,
+    port: email.port,
+    secure: email.secure,
+    user: email.user,
+    password: "",
+    fromName: email.fromName,
+    fromEmail: email.fromEmail,
+  });
+  const [busy, setBusy] = useState<null | "save" | "test">(null);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((p) => ({ ...p, [k]: v }));
+
+  async function save() {
+    setBusy("save");
+    setNotice(null);
+    const res = await saveEmailSettings({ provider, ...form });
+    setNotice(res.ok ? { ok: true, msg: "Email settings saved." } : { ok: false, msg: res.error });
+    setBusy(null);
+  }
+  async function test() {
+    setBusy("test");
+    setNotice(null);
+    const res = await testEmailSettings(form.user || form.fromEmail);
+    setNotice(
+      res.ok
+        ? { ok: true, msg: `Test email sent to ${form.user || form.fromEmail}. Check your inbox (and spam).` }
+        : { ok: false, msg: res.error ?? "Could not send test email." },
+    );
+    setBusy(null);
+  }
+
+  const connected = email.hasPassword && email.provider === "smtp";
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="Email delivery"
+        caption="Send booking confirmations from your own email"
+        action={
+          connected ? (
+            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-success-50 px-2.5 py-[3px] text-[0.66rem] font-bold tracking-wide text-success-700 uppercase">
+              <span className="h-1.5 w-1.5 rounded-full bg-success-500" />
+              Connected
+            </span>
+          ) : email.resendAvailable ? (
+            <span className="text-[0.72rem] font-semibold text-ink-faint">Using platform email</span>
+          ) : (
+            <span className="text-[0.72rem] font-semibold text-gold-700">Not sending yet</span>
+          )
+        }
+      />
+      <div className="px-5 py-5">
+        {notice && (
+          <div
+            className={cn(
+              "mb-4 rounded-[12px] border px-4 py-3 text-[0.82rem]",
+              notice.ok
+                ? "border-success-500/30 bg-success-50 text-success-700"
+                : "border-[#e4b7b5] bg-[#fdf6f5] text-[#8c3531]",
+            )}
+          >
+            {notice.msg}
+          </div>
+        )}
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          {(
+            [
+              { key: "smtp", label: "My own email (SMTP)" },
+              ...(email.resendAvailable ? [{ key: "resend", label: "Platform email" }] : []),
+              { key: "off", label: "Off" },
+            ] as Array<{ key: EmailSettingsView["provider"]; label: string }>
+          ).map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setProvider(o.key)}
+              className={cn(
+                "rounded-[var(--radius-pill)] border px-3.5 py-1.5 text-[0.8rem] font-semibold transition-colors",
+                provider === o.key
+                  ? "border-transparent bg-navy-900 text-white"
+                  : "border-line-strong bg-card text-ink-muted hover:border-blue-600 hover:text-blue-600",
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
+        {provider === "smtp" && (
+          <>
+            <div className="mb-4 flex items-start gap-2.5 rounded-[10px] border border-blue-200 bg-blue-50 px-3.5 py-2.5">
+              <Icon name="bell" className="mt-0.5 h-4 w-4 flex-none text-blue-600" />
+              <p className="text-[0.78rem] leading-[1.55] text-navy-800">
+                <span className="font-semibold">Using Gmail?</span> Host{" "}
+                <code className="rounded bg-white/60 px-1">smtp.gmail.com</code>, port{" "}
+                <code className="rounded bg-white/60 px-1">587</code>, and an{" "}
+                <span className="font-semibold">App Password</span> (Google Account → Security → 2-Step
+                Verification → App passwords) as the password — not your normal password.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <TField label="SMTP host" value={form.host} onChange={(v) => set("host", v)} />
+              <TField label="Port" type="number" value={String(form.port)} onChange={(v) => set("port", parseInt(v) || 587)} />
+              <TField label="Username" value={form.user} onChange={(v) => set("user", v)} />
+              <div>
+                <Label htmlFor="smtp-pass">Password / App password</Label>
+                <input
+                  id="smtp-pass"
+                  type="password"
+                  className={inputBase}
+                  placeholder={email.hasPassword ? "•••••••• (saved — leave blank to keep)" : "App password"}
+                  value={form.password}
+                  onChange={(e) => set("password", e.target.value)}
+                />
+              </div>
+              <TField label="From name" value={form.fromName} onChange={(v) => set("fromName", v)} />
+              <TField label="From email" type="email" value={form.fromEmail} onChange={(v) => set("fromEmail", v)} />
+            </div>
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-[0.82rem] text-ink-muted">
+              <input type="checkbox" checked={form.secure} onChange={(e) => set("secure", e.target.checked)} className="h-4 w-4 accent-blue-600" />
+              Use SSL (port 465). Leave off for port 587 (STARTTLS).
+            </label>
+          </>
+        )}
+
+        {provider === "resend" && (
+          <p className="text-[0.83rem] text-ink-muted">
+            Emails send through the platform&rsquo;s Resend account. Nothing to configure.
+          </p>
+        )}
+        {provider === "off" && (
+          <p className="text-[0.83rem] text-ink-muted">
+            Confirmation and reminder emails won&rsquo;t be sent.
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center justify-end gap-3 border-t border-line pt-5">
+          {provider === "smtp" && (
+            <GhostBtn onClick={test}>{busy === "test" ? "Sending…" : "Send test email"}</GhostBtn>
+          )}
+          <ActionButton icon="check" onClick={save}>
+            {busy === "save" ? "Saving…" : preview ? "Save (preview)" : "Save email settings"}
+          </ActionButton>
+        </div>
+      </div>
     </Panel>
   );
 }
