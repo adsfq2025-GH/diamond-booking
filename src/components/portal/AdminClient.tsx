@@ -26,8 +26,22 @@ const STATUS_TONE: Record<AdminTenant["status"], string> = {
   suspended: "bg-[#fbeaea] text-[#a63d39]",
 };
 
-export function AdminClient({ data, preview }: { data: AdminData; preview: boolean }) {
+export interface PlatformEmail {
+  method: "smtp" | "resend" | "none";
+  detail: string;
+}
+
+export function AdminClient({
+  data,
+  platformEmail,
+  preview,
+}: {
+  data: AdminData;
+  platformEmail?: PlatformEmail;
+  preview: boolean;
+}) {
   const [tab, setTab] = useState<Tab>("overview");
+  const pe: PlatformEmail = platformEmail ?? { method: preview ? "resend" : "none", detail: "notifications@demo" };
   const [tenants, setTenants] = useState(data.tenants);
   const [flags, setFlags] = useState(data.featureFlags);
 
@@ -87,6 +101,7 @@ export function AdminClient({ data, preview }: { data: AdminData; preview: boole
               </div>
             </Panel>
           </div>
+          <PlatformEmailCard pe={pe} />
         </div>
       )}
 
@@ -201,5 +216,48 @@ export function AdminClient({ data, preview }: { data: AdminData; preview: boole
         </Panel>
       )}
     </div>
+  );
+}
+
+function PlatformEmailCard({ pe }: { pe: PlatformEmail }) {
+  const label =
+    pe.method === "smtp"
+      ? `SMTP · ${pe.detail}`
+      : pe.method === "resend"
+        ? `Resend · ${pe.detail}`
+        : "Not configured";
+  const good = pe.method !== "none";
+  return (
+    <Panel>
+      <PanelHeader
+        title="Platform email"
+        caption="Default sender for tenants without their own SMTP"
+        action={
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2.5 py-[3px] text-[0.66rem] font-bold tracking-wide uppercase",
+              good ? "bg-success-50 text-success-700" : "bg-gold-100 text-gold-700",
+            )}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full", good ? "bg-success-500" : "bg-gold-500")} />
+            {good ? "Active" : "Off"}
+          </span>
+        }
+      />
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-surface-alt text-ink-muted">
+            <Icon name="invoices" className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-[0.88rem] font-semibold text-ink">{label}</p>
+            <p className="text-[0.76rem] text-ink-faint">
+              Set via <code className="rounded bg-surface-alt px-1">SMTP_*</code> or{" "}
+              <code className="rounded bg-surface-alt px-1">RESEND_*</code> environment variables
+            </p>
+          </div>
+        </div>
+      </div>
+    </Panel>
   );
 }

@@ -840,8 +840,10 @@ export interface EmailSettingsView {
 }
 
 export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
+  // Platform-level sender available if EITHER Resend or a platform SMTP is set.
   const resendAvailable = Boolean(
-    process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL,
+    (process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL) ||
+      (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
   );
   const base: EmailSettingsView = {
     provider: resendAvailable ? "resend" : "off",

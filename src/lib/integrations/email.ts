@@ -16,6 +16,31 @@ export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL);
 }
 
+/** Platform-wide SMTP set via env (SMTP_HOST/USER/PASS...) — your own mail server. */
+export function platformSmtpConfigured(): boolean {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+/** Any platform-level sender configured (SMTP or Resend). */
+export function platformEmailConfigured(): boolean {
+  return platformSmtpConfigured() || emailConfigured();
+}
+
+function platformSmtpConfig(): TenantSmtp | null {
+  if (!platformSmtpConfigured()) return null;
+  // SMTP_FROM may be "Name <email>" or a bare address — nodemailer accepts either.
+  const from = process.env.SMTP_FROM || (process.env.SMTP_USER as string);
+  return {
+    host: process.env.SMTP_HOST as string,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: /^(1|true|yes)$/i.test(process.env.SMTP_SECURE ?? "") || Number(process.env.SMTP_PORT) === 465,
+    user: process.env.SMTP_USER as string,
+    pass: process.env.SMTP_PASS as string,
+    fromName: "",
+    fromEmail: from,
+  };
+}
+
 let client: Resend | null = null;
 function getResend(): Resend | null {
   if (!emailConfigured()) return null;
@@ -114,6 +139,10 @@ async function send(
       return sendViaSmtp(cfg.smtp, to, subject, html);
     }
   }
+  // Platform-wide SMTP (your own mail server) takes priority over Resend.
+  const platformSmtp = platformSmtpConfig();
+  if (platformSmtp) return sendViaSmtp(platformSmtp, to, subject, html);
+
   const resend = getResend();
   if (!resend) return { ok: false, skipped: true, error: "Email not configured" };
   try {
@@ -137,7 +166,7 @@ export async function tenantEmailWillSend(tenantId: string | null): Promise<bool
     if (cfg?.provider === "off") return false;
     if (cfg?.provider === "smtp" && smtpComplete(cfg.smtp)) return true;
   }
-  return emailConfigured();
+  return platformEmailConfigured();
 }
 
 /** Same, but resolves the tenant from a widget public key (for the booking page). */

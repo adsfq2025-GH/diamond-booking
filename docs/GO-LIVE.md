@@ -100,8 +100,8 @@ Local testing: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`.
 
 ## 5. Email — two options (pick either or both)
 
-Booking emails are sent using, in order: **the tenant's own SMTP**, then a
-**platform-wide Resend** key, else nothing (no error).
+Booking emails are sent using, in order: **the tenant's own SMTP**, then your
+**platform-wide SMTP**, then a **platform-wide Resend** key, else nothing (no error).
 
 **Option A — each business connects their own email (no env vars).**
 In the app: **Settings → Integrations → Email delivery → "My own email (SMTP)"**.
@@ -110,7 +110,19 @@ For Gmail: host `smtp.gmail.com`, port `587`, username = the Gmail address, and 
 passwords) as the password. Then **Send test email** to confirm. The password is
 stored server-side only. This is the simplest path for a single business.
 
-**Option B — platform-wide Resend (one sender for everyone).**
+**Option B — your own platform-wide SMTP (env, one sender for everyone).**
+Set these env vars (Vercel + `.env.local`); they take priority over Resend:
+```
+SMTP_HOST=smtp.yourprovider.com
+SMTP_PORT=587
+SMTP_SECURE=false          # true only for port 465
+SMTP_USER=your-smtp-username
+SMTP_PASS=your-smtp-password-or-app-password
+SMTP_FROM=Diamond Booking <notifications@yourdomain.com>
+```
+Redeploy. Every tenant that hasn't set their own SMTP now sends through yours.
+
+**Option C — platform-wide Resend (env, one sender for everyone).**
 1. <https://resend.com> → add & **verify your sending domain** (SPF + DKIM DNS
    records they provide). This keeps emails out of spam.
 2. Create an API key → `RESEND_API_KEY`.
