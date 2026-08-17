@@ -193,12 +193,15 @@ export async function createWidgetBooking(
   // Fire-and-forget confirmation email (tenant SMTP → platform Resend → no-op).
   if (cfg && svc) {
     const start = new Date(result.starts_at);
+    // Render the time in the BUSINESS's timezone so the email matches what the
+    // customer picked and what the dashboard shows (not the server's UTC).
+    const tz = cfg.tenant.timezone || undefined;
     void sendBookingConfirmationForKey(input.publicKey, {
       businessName: cfg.tenant.name,
       customerName: input.customerName,
       customerEmail: input.customerEmail,
       serviceName: svc.name,
-      whenText: `${start.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+      whenText: `${start.toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })} at ${start.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}`,
       priceText: `$${(result.price_cents / 100).toFixed(2)}`,
       addressText: (input.address as { line1?: string } | null)?.line1 ?? undefined,
     }).catch(() => {});

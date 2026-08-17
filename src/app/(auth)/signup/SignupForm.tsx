@@ -20,6 +20,7 @@ import {
 } from "../auth-ui";
 import { signUp, type AuthFormState } from "@/lib/actions/auth";
 import { passwordScore } from "@/lib/password";
+import { PLANS, PLAN_ORDER } from "@/lib/plans";
 import { cn } from "@/lib/cn";
 
 const industries = [
@@ -43,6 +44,7 @@ type Values = {
   email: string;
   password: string;
   industry: string;
+  plan: string;
   terms: boolean;
 };
 
@@ -78,6 +80,7 @@ export function SignupForm() {
     email: "",
     password: "",
     industry: "",
+    plan: "professional",
     terms: false,
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -290,6 +293,62 @@ export function SignupForm() {
             </select>
           </SelectShell>
           <FieldError id="signup-industry-error">{showError("industry")}</FieldError>
+        </div>
+
+        {/* Plan selection — trialed free for 7 days, switchable anytime */}
+        <div className="mb-6">
+          <p className="mb-2 text-[0.8rem] font-semibold text-ink">
+            Choose your plan{" "}
+            <span className="font-normal text-ink-faint">— free for 7 days, switch anytime</span>
+          </p>
+          <div className="grid gap-2.5 min-[521px]:grid-cols-3">
+            {PLAN_ORDER.map((tier) => {
+              const p = PLANS[tier];
+              const selected = values.plan === tier;
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  onClick={() => set("plan", tier)}
+                  aria-pressed={selected}
+                  className={cn(
+                    "relative rounded-[12px] border p-3.5 text-left transition-[border-color,background-color,transform] duration-[var(--duration-fast)]",
+                    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600",
+                    selected
+                      ? "border-blue-600 bg-blue-50/60 ring-1 ring-blue-600"
+                      : "border-line-strong hover:-translate-y-0.5 hover:border-blue-400",
+                  )}
+                >
+                  {tier === "professional" && (
+                    <span className="absolute -top-2 right-3 rounded-[var(--radius-pill)] bg-gold-500 px-2 py-[1px] text-[0.58rem] font-bold tracking-[0.06em] text-navy-950 uppercase">
+                      Popular
+                    </span>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <p className="text-[0.9rem] font-semibold text-ink">{p.name}</p>
+                    <span
+                      className={cn(
+                        "flex h-4 w-4 flex-none items-center justify-center rounded-full border",
+                        selected ? "border-blue-600 bg-blue-600 text-white" : "border-line-strong",
+                      )}
+                    >
+                      {selected && (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" className="h-2.5 w-2.5">
+                          <path d="M4 12l5 5L20 6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </span>
+                  </div>
+                  <p className="font-instrument mt-0.5 text-[1.15rem] leading-none font-semibold text-ink">
+                    ${p.priceMonthly}
+                    <span className="text-[0.68rem] font-medium text-ink-faint">/mo</span>
+                  </p>
+                  <p className="mt-1.5 text-[0.7rem] leading-[1.45] text-ink-faint">{p.description}</p>
+                </button>
+              );
+            })}
+          </div>
+          <input type="hidden" name="plan" value={values.plan} />
         </div>
 
         <div className="mb-7">

@@ -24,7 +24,7 @@ import {
   defaultHours,
   type TenantSettings,
 } from "@/lib/onboarding/types";
-import type { Json, TablesInsert, UserRole } from "@/types/database";
+import type { Json, PlanTier, TablesInsert, UserRole } from "@/types/database";
 
 export type AuthFormState = {
   error?: string;
@@ -69,6 +69,14 @@ export async function signUp(
   const email = field(formData, "email").toLowerCase();
   const password = String(formData.get("new-password") ?? "");
   const industry = field(formData, "industry");
+
+  // Plan the owner chose on the signup form (they trial it for 7 days).
+  const planRaw = field(formData, "plan");
+  const plan: PlanTier = (["starter", "professional", "elite"] as const).includes(
+    planRaw as PlanTier,
+  )
+    ? (planRaw as PlanTier)
+    : "professional";
 
   if (!business || !fullName || !industry || !EMAIL_RE.test(email)) {
     return { error: "Please fill out every field with valid values." };
@@ -140,7 +148,7 @@ export async function signUp(
           photos: [],
         } as unknown as Json,
         settings: settings as unknown as Json,
-        plan: "starter",
+        plan,
         subscription_status: "trialing",
         trial_ends_at: trialEndsAt,
       })
