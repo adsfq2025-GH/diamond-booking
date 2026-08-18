@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
 import {
   computeOccurrences,
@@ -60,6 +60,57 @@ export async function cancelSeries(
   revalidatePath("/dashboard/bookings");
   revalidatePath("/dashboard/calendar");
   return { ok: true, count: data?.length ?? 0 };
+}
+
+/**
+ * Customer-facing cancel from the portal. Verifies the booking belongs to the
+ * signed-in customer. If it's part of a recurring series, cancels the whole
+ * future series (their standing appointment ends). Not promoted in the UI, but
+ * available for a customer who goes looking for it.
+ */
+export async function cancelMyBooking(
+  bookingId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabaseEnvConfigured()) return { ok: true };
+  const profile = await requireRole("customer");
+  const supabase = await createClient();
+  const { data: custs } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("profile_id", profile.id);
+  const custIds = (custs ?? []).map((c) => c.id);
+  if (custIds.length === 0) return { ok: false, error: "No customer record found." };
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { ok: false, error: "Cancellation is temporarily unavailable." };
+  }
+
+  const { data: bk } = await admin
+    .from("bookings")
+    .select("id, customer_id, recurrence_group_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (!bk || !custIds.includes(bk.customer_id)) return { ok: false, error: "Booking not found." };
+
+  if (bk.recurrence_group_id) {
+    await admin
+      .from("bookings")
+      .update({ status: "cancelled" satisfies BookingStatus })
+      .eq("recurrence_group_id", bk.recurrence_group_id)
+      .in("customer_id", custIds)
+      .gte("starts_at", new Date().toISOString())
+      .in("status", ["pending", "confirmed", "rescheduled"]);
+  } else {
+    await admin
+      .from("bookings")
+      .update({ status: "cancelled" satisfies BookingStatus })
+      .eq("id", bookingId);
+  }
+  revalidatePath("/portal");
+  return { ok: true };
 }
 
 /**

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { money, relativeDay, shortDate, timeRange } from "@/lib/format";
+import { cancelMyBooking } from "@/lib/actions/bookings";
 import type { CustomerPortal, CustBooking } from "@/lib/portal/data";
 import { Icon } from "@/components/dashboard/icons";
 import { Avatar, BookingStatusBadge, InvoiceStatusBadge, Panel, PanelHeader, EmptyState } from "@/components/dashboard/ui";
@@ -24,7 +25,13 @@ export function CustomerPortalClient({
   preview: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("upcoming");
+  const [upcoming, setUpcoming] = useState(data.upcoming);
   const bookUrl = `/book/${data.publicKey}`;
+
+  async function cancel(id: string) {
+    setUpcoming((prev) => prev.filter((b) => b.id !== id));
+    if (!preview) await cancelMyBooking(id);
+  }
 
   return (
     <div>
@@ -36,7 +43,7 @@ export function CustomerPortalClient({
             Welcome back, {data.name.split(" ")[0]}.
           </h1>
           <p className="mt-1 text-[0.88rem] text-ink-muted">
-            {data.upcoming.length} upcoming {data.upcoming.length === 1 ? "appointment" : "appointments"}.
+            {upcoming.length} upcoming {upcoming.length === 1 ? "appointment" : "appointments"}.
           </p>
         </div>
         <a
@@ -69,7 +76,7 @@ export function CustomerPortalClient({
       {tab === "upcoming" && (
         <Panel>
           <PanelHeader title="Upcoming appointments" />
-          {data.upcoming.length === 0 ? (
+          {upcoming.length === 0 ? (
             <EmptyState
               icon="calendar"
               title="No upcoming appointments"
@@ -77,8 +84,8 @@ export function CustomerPortalClient({
             />
           ) : (
             <ul className="divide-y divide-line">
-              {data.upcoming.map((b) => (
-                <BookingRow key={b.id} b={b} actions />
+              {upcoming.map((b) => (
+                <BookingRow key={b.id} b={b} onCancel={cancel} />
               ))}
             </ul>
           )}
@@ -163,48 +170,69 @@ export function CustomerPortalClient({
   );
 }
 
-function BookingRow({ b, actions = false }: { b: CustBooking; actions?: boolean }) {
+function BookingRow({
+  b,
+  onCancel,
+}: {
+  b: CustBooking;
+  onCancel?: (id: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
   return (
-    <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
-      <div className="flex flex-1 items-center gap-4">
-        <div className="flex-none text-center">
-          <p className="text-[0.7rem] font-bold tracking-wide text-ink-faint uppercase">
-            {new Date(b.startsAt).toLocaleDateString("en-US", { month: "short" })}
-          </p>
-          <p className="font-instrument text-[1.3rem] leading-none font-semibold text-ink">
-            {new Date(b.startsAt).getDate()}
-          </p>
-        </div>
-        <div className="min-w-0 flex-1 border-l border-line pl-4">
-          <div className="flex items-center gap-2">
-            <p className="truncate text-[0.9rem] font-semibold text-ink">{b.serviceName}</p>
-            <BookingStatusBadge status={b.status} />
-          </div>
-          <p className="mt-0.5 text-[0.78rem] text-ink-muted">
-            {relativeDay(b.startsAt)} · {timeRange(b.startsAt, b.endsAt)} · {b.employeeName}
-          </p>
-          {b.addressLine && <p className="text-[0.75rem] text-ink-faint">{b.addressLine}</p>}
-        </div>
-        <span className="hidden font-instrument text-[0.95rem] font-semibold text-ink sm:block">
-          {money(b.priceCents)}
-        </span>
+    <li className="flex items-center gap-4 px-5 py-4">
+      <div className="flex-none text-center">
+        <p className="text-[0.7rem] font-bold tracking-wide text-ink-faint uppercase">
+          {new Date(b.startsAt).toLocaleDateString("en-US", { month: "short" })}
+        </p>
+        <p className="font-instrument text-[1.3rem] leading-none font-semibold text-ink">
+          {new Date(b.startsAt).getDate()}
+        </p>
       </div>
-      {actions && (
-        <div className="flex items-center gap-2 sm:flex-none">
-          <button
-            type="button"
-            className="flex-1 rounded-[9px] border border-line-strong bg-card px-3.5 py-2 text-[0.8rem] font-semibold text-ink transition-colors hover:border-blue-600 hover:text-blue-600 sm:flex-none"
-          >
-            Reschedule
-          </button>
-          <button
-            type="button"
-            className="flex-1 rounded-[9px] border border-line-strong bg-card px-3.5 py-2 text-[0.8rem] font-semibold text-ink-faint transition-colors hover:border-[#c25450] hover:text-[#a63d39] sm:flex-none"
-          >
-            Cancel
-          </button>
+      <div className="min-w-0 flex-1 border-l border-line pl-4">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-[0.9rem] font-semibold text-ink">{b.serviceName}</p>
+          <BookingStatusBadge status={b.status} />
         </div>
-      )}
+        <p className="mt-0.5 text-[0.78rem] text-ink-muted">
+          {relativeDay(b.startsAt)} · {timeRange(b.startsAt, b.endsAt)} · {b.employeeName}
+        </p>
+        {b.addressLine && <p className="text-[0.75rem] text-ink-faint">{b.addressLine}</p>}
+        {/* Unpromoted cancel — small and quiet; a customer can find it if needed. */}
+        {onCancel && (
+          <div className="mt-1.5">
+            {confirming ? (
+              <span className="inline-flex items-center gap-2 text-[0.72rem] text-ink-faint">
+                Cancel this booking?
+                <button
+                  type="button"
+                  onClick={() => onCancel(b.id)}
+                  className="font-semibold text-[#a63d39] hover:underline"
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  className="hover:text-ink"
+                >
+                  No
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="text-[0.72rem] text-ink-faint/70 transition-colors hover:text-ink-muted"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <span className="hidden flex-none font-instrument text-[0.95rem] font-semibold text-ink sm:block">
+        {money(b.priceCents)}
+      </span>
     </li>
   );
 }

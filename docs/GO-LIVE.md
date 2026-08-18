@@ -148,6 +148,17 @@ env-defined account, so the endpoint is safe to reach.
 
 ---
 
+## 5c. Recurring auto-renew (cron)
+
+Open-ended recurring bookings keep themselves going via a daily job
+(`vercel.json` already schedules `/api/cron/extend-recurring`). Just set a
+secret so only the scheduler can run it:
+```
+CRON_SECRET=<a long random string>
+```
+Vercel Cron sends it automatically. No other setup — the job tops up any series
+running low each day; cancelling a series stops its renewal.
+
 ## 6. Twilio (SMS reminders — optional, paid plans)
 
 1. Buy a phone number in the Twilio console.
