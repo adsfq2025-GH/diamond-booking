@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { money, shortDate, timeRange } from "@/lib/format";
-import { cancelSeries, setBookingStatus } from "@/lib/actions/bookings";
+import { cancelSeries, extendSeries, setBookingStatus } from "@/lib/actions/bookings";
 import { recurrenceLabel } from "@/lib/recurrence";
 import type { BookingView, BookingsData } from "@/lib/dashboard/types";
 import type { BookingStatus } from "@/types/database";
@@ -42,10 +43,27 @@ export function BookingsClient({
   timezone: string;
   preview: boolean;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState(data.bookings);
   const [tab, setTab] = useState<Tab>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<BookingView | null>(null);
+  const [seriesNotice, setSeriesNotice] = useState<string | null>(null);
+
+  async function extend(groupId: string) {
+    setSeriesNotice("Extending…");
+    if (preview) {
+      setSeriesNotice("Preview mode — more occurrences would be reserved on your calendar.");
+      return;
+    }
+    const res = await extendSeries(groupId);
+    if (res.ok) {
+      setSeriesNotice(`Reserved ${res.count ?? 0} more occurrences.`);
+      router.refresh();
+    } else {
+      setSeriesNotice(res.error ?? "Could not extend the series.");
+    }
+  }
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: rows.length };
@@ -156,7 +174,10 @@ export function BookingsClient({
 
       {selected && (
         <Sheet
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            setSelected(null);
+            setSeriesNotice(null);
+          }}
           eyebrow={selected.reference}
           title={selected.customerName}
           footer={
@@ -167,14 +188,30 @@ export function BookingsClient({
             />
           }
         >
-          <BookingDetail b={selected} timezone={timezone} />
+          <BookingDetail
+            b={selected}
+            timezone={timezone}
+            seriesNotice={seriesNotice}
+            onExtend={extend}
+          />
         </Sheet>
       )}
     </div>
   );
 }
 
-function BookingDetail({ b, timezone }: { b: BookingView; timezone: string }) {
+function BookingDetail({
+  b,
+  timezone,
+  seriesNotice,
+  onExtend,
+}: {
+  b: BookingView;
+  timezone: string;
+  seriesNotice: string | null;
+  onExtend: (groupId: string) => void;
+}) {
+  const recurring = b.recurrenceRule && b.recurrenceRule !== "none";
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -182,12 +219,26 @@ function BookingDetail({ b, timezone }: { b: BookingView; timezone: string }) {
         <span className="text-[0.72rem] text-ink-faint capitalize">via {b.source}</span>
       </div>
 
-      {b.recurrenceRule && b.recurrenceRule !== "none" && (
-        <div className="flex items-center gap-2 rounded-[10px] border border-blue-200 bg-blue-50 px-3.5 py-2.5">
-          <Icon name="calendar" className="h-4 w-4 flex-none text-blue-600" />
-          <p className="text-[0.8rem] text-navy-800">
-            Part of a recurring series — <span className="font-semibold">{recurrenceLabel(b.recurrenceRule).toLowerCase()}</span>.
-          </p>
+      {recurring && (
+        <div className="rounded-[10px] border border-blue-200 bg-blue-50 px-3.5 py-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-[0.8rem] text-navy-800">
+              <Icon name="calendar" className="h-4 w-4 flex-none text-blue-600" />
+              Recurring series — <span className="font-semibold">{recurrenceLabel(b.recurrenceRule).toLowerCase()}</span>
+            </p>
+            {b.recurrenceGroupId && b.status !== "cancelled" && (
+              <button
+                type="button"
+                onClick={() => onExtend(b.recurrenceGroupId as string)}
+                className="flex-none rounded-[8px] border border-blue-300 bg-white px-2.5 py-1 text-[0.74rem] font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+              >
+                Extend
+              </button>
+            )}
+          </div>
+          {seriesNotice && (
+            <p className="mt-1.5 text-[0.74rem] text-navy-800/80">{seriesNotice}</p>
+          )}
         </div>
       )}
 
