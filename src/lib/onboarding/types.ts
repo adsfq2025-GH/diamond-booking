@@ -11,6 +11,8 @@ export interface TenantSettings {
   cancellation_window_hours?: number;
   deposit_required?: boolean;
   payments_enabled?: boolean;
+  /** Let customers set up recurring (repeating) bookings in the widget. */
+  recurring_enabled?: boolean;
   default_buffer_minutes?: number;
   onboarding_step?: number;
   onboarding_complete?: boolean;
@@ -101,6 +103,7 @@ export interface FinishInput {
   cancellation_window_hours: number;
   deposit_required: boolean;
   payments_enabled: boolean;
+  recurring_enabled: boolean;
 }
 
 /** Everything the wizard edits, hydrated server-side (or mocked). */

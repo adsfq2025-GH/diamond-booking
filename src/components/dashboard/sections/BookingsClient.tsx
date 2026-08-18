@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { money, shortDate, timeRange } from "@/lib/format";
+import { cancelSeries, setBookingStatus } from "@/lib/actions/bookings";
+import { recurrenceLabel } from "@/lib/recurrence";
 import type { BookingView, BookingsData } from "@/lib/dashboard/types";
 import type { BookingStatus } from "@/types/database";
 import { Icon } from "../icons";
@@ -67,6 +69,22 @@ export function BookingsClient({
   function setStatus(id: string, status: BookingStatus) {
     setRows((prev) => prev.map((b) => (b.id === id ? { ...b, status } : b)));
     setSelected((s) => (s && s.id === id ? { ...s, status } : s));
+    if (!preview) void setBookingStatus(id, status);
+  }
+
+  function cancelWholeSeries(groupId: string) {
+    const now = Date.now();
+    setRows((prev) =>
+      prev.map((b) =>
+        b.recurrenceGroupId === groupId &&
+        new Date(b.startsAt).getTime() >= now &&
+        b.status !== "completed"
+          ? { ...b, status: "cancelled" }
+          : b,
+      ),
+    );
+    setSelected(null);
+    if (!preview) void cancelSeries(groupId);
   }
 
   return (
@@ -141,7 +159,13 @@ export function BookingsClient({
           onClose={() => setSelected(null)}
           eyebrow={selected.reference}
           title={selected.customerName}
-          footer={<StatusActions booking={selected} onSet={setStatus} />}
+          footer={
+            <StatusActions
+              booking={selected}
+              onSet={setStatus}
+              onCancelSeries={cancelWholeSeries}
+            />
+          }
         >
           <BookingDetail b={selected} timezone={timezone} />
         </Sheet>
@@ -157,6 +181,15 @@ function BookingDetail({ b, timezone }: { b: BookingView; timezone: string }) {
         <BookingStatusBadge status={b.status} />
         <span className="text-[0.72rem] text-ink-faint capitalize">via {b.source}</span>
       </div>
+
+      {b.recurrenceRule && b.recurrenceRule !== "none" && (
+        <div className="flex items-center gap-2 rounded-[10px] border border-blue-200 bg-blue-50 px-3.5 py-2.5">
+          <Icon name="calendar" className="h-4 w-4 flex-none text-blue-600" />
+          <p className="text-[0.8rem] text-navy-800">
+            Part of a recurring series — <span className="font-semibold">{recurrenceLabel(b.recurrenceRule).toLowerCase()}</span>.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-[14px] border border-line bg-surface-alt/40 p-4">
         <p className="font-display text-[1.05rem] font-semibold text-ink">{b.serviceName}</p>
@@ -218,36 +251,53 @@ function DR({
 function StatusActions({
   booking,
   onSet,
+  onCancelSeries,
 }: {
   booking: BookingView;
   onSet: (id: string, status: BookingStatus) => void;
+  onCancelSeries: (groupId: string) => void;
 }) {
   const actions: Array<{ label: string; status: BookingStatus; primary?: boolean }> = [];
   if (booking.status === "pending") actions.push({ label: "Confirm", status: "confirmed", primary: true });
   if (booking.status === "confirmed") actions.push({ label: "Mark complete", status: "completed", primary: true });
-  if (booking.status !== "cancelled" && booking.status !== "completed")
-    actions.push({ label: "Cancel", status: "cancelled" });
+  const active = booking.status !== "cancelled" && booking.status !== "completed";
+  if (active)
+    actions.push({
+      label: booking.recurrenceGroupId ? "Cancel this one" : "Cancel",
+      status: "cancelled",
+    });
 
   return (
-    <div className="flex w-full items-center justify-between gap-2">
-      {booking.status === "confirmed" ? (
-        <GhostBtn onClick={() => onSet(booking.id, "no_show")}>No-show</GhostBtn>
-      ) : (
-        <span />
-      )}
-      <div className="flex items-center gap-2">
-        {actions.map((a) =>
-          a.primary ? (
-            <ActionButton key={a.status} icon="check" onClick={() => onSet(booking.id, a.status)}>
-              {a.label}
-            </ActionButton>
-          ) : (
-            <GhostBtn key={a.status} onClick={() => onSet(booking.id, a.status)}>
-              {a.label}
-            </GhostBtn>
-          ),
+    <div className="flex w-full flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        {booking.status === "confirmed" ? (
+          <GhostBtn onClick={() => onSet(booking.id, "no_show")}>No-show</GhostBtn>
+        ) : (
+          <span />
         )}
+        <div className="flex items-center gap-2">
+          {actions.map((a) =>
+            a.primary ? (
+              <ActionButton key={a.status} icon="check" onClick={() => onSet(booking.id, a.status)}>
+                {a.label}
+              </ActionButton>
+            ) : (
+              <GhostBtn key={a.label} onClick={() => onSet(booking.id, a.status)}>
+                {a.label}
+              </GhostBtn>
+            ),
+          )}
+        </div>
       </div>
+      {active && booking.recurrenceGroupId && (
+        <button
+          type="button"
+          onClick={() => onCancelSeries(booking.recurrenceGroupId as string)}
+          className="self-end text-[0.78rem] font-semibold text-ink-faint transition-colors hover:text-[#a63d39]"
+        >
+          Cancel entire series →
+        </button>
+      )}
     </div>
   );
 }

@@ -329,6 +329,9 @@ function buildBookings(): BookingView[] {
       addressLine: c?.addressLine ?? null,
       notes,
       source,
+      // Demo: the first booking is a biweekly recurring series.
+      recurrenceRule: i === 0 ? "biweekly" : null,
+      recurrenceGroupId: i === 0 ? "grp-demo-1" : null,
     };
   });
 }
@@ -399,6 +402,7 @@ export function getMockCalendar(): CalendarData {
     status: b.status,
     startsAt: b.startsAt,
     endsAt: b.endsAt,
+    recurrenceRule: b.recurrenceRule,
   }));
   return {
     events,

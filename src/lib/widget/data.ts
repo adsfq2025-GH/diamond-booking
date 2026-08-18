@@ -7,10 +7,11 @@
  */
 import "server-only";
 import { supabaseEnvConfigured } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMockServices } from "@/lib/dashboard/mock-data";
 import { MOCK } from "@/lib/dashboard/mock";
 import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
+import { computeOccurrences, type RecurrenceRule } from "@/lib/recurrence";
 import type {
   AvailableSlot,
   WidgetConfigPayload,
@@ -145,6 +146,97 @@ export interface CreateBookingInput {
   address?: Record<string, unknown> | null;
   notes?: string | null;
   addonIds?: string[];
+  /** Recurrence for the series ("none" = one-time). */
+  recurrence?: RecurrenceRule;
+  /** ISO date string; null/undefined = open-ended (rolling window). */
+  recurrenceUntil?: string | null;
+}
+
+/** Whether the tenant has enabled customer-facing recurring bookings. */
+export async function getWidgetRecurringEnabled(publicKey: string): Promise<boolean> {
+  if (!supabaseEnvConfigured()) return true; // demo: show the option
+  try {
+    const admin = createAdminClient();
+    const { data: wc } = await admin
+      .from("widget_configs")
+      .select("tenant_id")
+      .eq("public_key", publicKey)
+      .maybeSingle();
+    if (!wc?.tenant_id) return false;
+    const { data: tenant } = await admin
+      .from("tenants")
+      .select("settings")
+      .eq("id", wc.tenant_id)
+      .maybeSingle();
+    const settings = (tenant?.settings ?? {}) as { recurring_enabled?: boolean };
+    return Boolean(settings.recurring_enabled);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reserve every future occurrence of a recurring booking as its own bookings
+ * row (service role). Rows share recurrence_group_id. Occurrences that would
+ * clash with an existing booking (GiST exclusion) are skipped, not fatal.
+ */
+async function materializeRecurrence(
+  firstBookingId: string,
+  rule: RecurrenceRule,
+  recurrenceUntil: string | null,
+): Promise<void> {
+  if (!rule || rule === "none") return;
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return; // no service-role key — skip (first booking still stands)
+  }
+
+  const { data: first } = await admin
+    .from("bookings")
+    .select("*")
+    .eq("id", firstBookingId)
+    .maybeSingle();
+  if (!first) return;
+
+  const groupId = crypto.randomUUID();
+  const until = recurrenceUntil ? new Date(recurrenceUntil) : null;
+
+  // Tag the original as the series anchor.
+  await admin
+    .from("bookings")
+    .update({ recurrence_group_id: groupId, recurrence_rule: rule, recurrence_until: recurrenceUntil ?? null })
+    .eq("id", firstBookingId);
+
+  const durationMs = new Date(first.ends_at).getTime() - new Date(first.starts_at).getTime();
+  const occurrences = computeOccurrences(new Date(first.starts_at), rule, until);
+
+  for (const start of occurrences) {
+    const ends = new Date(start.getTime() + durationMs);
+    const { error } = await admin.from("bookings").insert({
+      tenant_id: first.tenant_id,
+      customer_id: first.customer_id,
+      service_id: first.service_id,
+      employee_id: first.employee_id,
+      status: first.status,
+      starts_at: start.toISOString(),
+      ends_at: ends.toISOString(),
+      price_cents: first.price_cents,
+      deposit_cents: first.deposit_cents,
+      address: first.address,
+      customer_notes: first.customer_notes,
+      source: first.source,
+      recurrence_group_id: groupId,
+      recurrence_rule: rule,
+      recurrence_until: recurrenceUntil ?? null,
+    });
+    // Overlap with an existing booking -> that slot is already taken; skip it.
+    if (error && !/exclu|overlap|conflict|23P01/i.test(error.message)) {
+      // Non-conflict error: stop trying further occurrences.
+      break;
+    }
+  }
 }
 
 /** Create the booking via RPC, or synthesize a confirmation in preview mode. */
@@ -189,6 +281,15 @@ export async function createWidgetBooking(
     return { ok: false, error: error?.message ?? "Could not create booking." };
   }
   const result = data as unknown as WidgetBookingResult;
+
+  // Reserve future occurrences on the calendar (blocks availability).
+  if (input.recurrence && input.recurrence !== "none") {
+    await materializeRecurrence(
+      result.booking_id,
+      input.recurrence,
+      input.recurrenceUntil ?? null,
+    ).catch(() => {});
+  }
 
   // Fire-and-forget confirmation email (tenant SMTP → platform Resend → no-op).
   if (cfg && svc) {

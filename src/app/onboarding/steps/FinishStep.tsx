@@ -171,6 +171,15 @@ export function FinishStep({
         />
         <div className="border-t border-line pt-5">
           <Toggle
+            id="finish-recurring"
+            checked={finish.recurring_enabled}
+            onChange={(next) => setFinish((f) => ({ ...f, recurring_enabled: next }))}
+            label="Allow recurring bookings"
+            description="Let customers set a repeating schedule (weekly, every 2 weeks, monthly…). Each occurrence is reserved on your calendar so the time stays blocked."
+          />
+        </div>
+        <div className="border-t border-line pt-5">
+          <Toggle
             id="finish-payments"
             checked={finish.payments_enabled}
             onChange={(next) => setFinish((f) => ({ ...f, payments_enabled: next }))}

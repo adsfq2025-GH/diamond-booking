@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { money } from "@/lib/format";
 import { fetchSlots, submitBooking } from "@/lib/actions/widget";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { RECURRENCE_OPTIONS, recurrenceLabel, type RecurrenceRule } from "@/lib/recurrence";
 import type {
   AvailableSlot,
   WidgetBookingResult,
@@ -25,11 +26,13 @@ export function BookingFlow({
   config,
   embedded,
   emailWillSend,
+  recurringEnabled,
 }: {
   publicKey: string;
   config: WidgetConfigPayload;
   embedded: boolean;
   emailWillSend: boolean;
+  recurringEnabled: boolean;
 }) {
   const accent = (config.theme as { primary_color?: string })?.primary_color ?? "#2e86c1";
   const customFields = (config.custom_fields as CustomField[]) ?? [];
@@ -44,6 +47,7 @@ export function BookingFlow({
   const [slot, setSlot] = useState<AvailableSlot | null>(null);
   const [details, setDetails] = useState({ name: "", email: "", phone: "", address: "", notes: "" });
   const [custom, setCustom] = useState<Record<string, string>>({});
+  const [recurrence, setRecurrence] = useState<RecurrenceRule>("none");
   const [result, setResult] = useState<WidgetBookingResult | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -154,6 +158,9 @@ export function BookingFlow({
               slot={slot}
               accent={accent}
               tz={tz}
+              recurringEnabled={recurringEnabled}
+              recurrence={recurrence}
+              onRecurrence={setRecurrence}
               details={details}
               custom={custom}
               customFields={customFields}
@@ -176,6 +183,8 @@ export function BookingFlow({
                     .filter(Boolean)
                     .join(" · ") || null,
                   addonIds: [...addons],
+                  recurrence,
+                  recurrenceUntil: null,
                 });
                 if (res.ok) {
                   setResult(res.result);
@@ -449,6 +458,9 @@ function DetailsStep({
   slot,
   accent,
   tz,
+  recurringEnabled,
+  recurrence,
+  onRecurrence,
   details,
   custom,
   customFields,
@@ -463,6 +475,9 @@ function DetailsStep({
   slot: AvailableSlot;
   accent: string;
   tz?: string;
+  recurringEnabled: boolean;
+  recurrence: RecurrenceRule;
+  onRecurrence: (r: RecurrenceRule) => void;
   details: { name: string; email: string; phone: string; address: string; notes: string };
   custom: Record<string, string>;
   customFields: CustomField[];
@@ -503,6 +518,37 @@ function DetailsStep({
         )}
         <p className="mt-2 font-instrument text-[1.05rem] font-semibold text-ink">{money(priceTotal)}</p>
       </div>
+
+      {recurringEnabled && (
+        <div className="mb-4">
+          <p className="mb-2 text-[0.8rem] font-semibold text-ink">Repeat this booking?</p>
+          <div className="grid grid-cols-2 gap-2 min-[380px]:grid-cols-3">
+            {RECURRENCE_OPTIONS.map((o) => {
+              const on = recurrence === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => onRecurrence(o.value)}
+                  className="rounded-[9px] border px-2.5 py-2 text-[0.78rem] font-semibold transition-colors"
+                  style={{
+                    borderColor: on ? accent : "var(--line-strong)",
+                    backgroundColor: on ? `${accent}14` : "transparent",
+                    color: on ? "var(--ink)" : "var(--ink-muted)",
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
+          {recurrence !== "none" && (
+            <p className="mt-2 text-[0.72rem] leading-[1.5] text-ink-faint">
+              We&rsquo;ll reserve this same time {recurrenceLabel(recurrence).toLowerCase()} going forward, so it stays yours. Cancel anytime.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2.5">
         <input

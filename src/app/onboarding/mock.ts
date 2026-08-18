@@ -50,6 +50,7 @@ export function mockWizardData(): WizardData {
       cancellation_window_hours: 24,
       deposit_required: false,
       payments_enabled: false,
+      recurring_enabled: true,
     },
   };
 }

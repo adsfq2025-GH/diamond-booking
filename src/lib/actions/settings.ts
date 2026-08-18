@@ -117,6 +117,39 @@ export async function saveEmailSettings(
   return { ok: true };
 }
 
+/** Persist booking rules (recurring toggle, auto-confirm). */
+export async function saveBookingSettings(input: {
+  recurringEnabled: boolean;
+  autoConfirm: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!supabaseEnvConfigured()) {
+    return { ok: false, error: "Preview mode — connect Supabase to save." };
+  }
+  const profile = await requireRole("business_owner");
+  if (!profile.tenant_id) return { ok: false, error: "No business found." };
+
+  const supabase = await createClient();
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("settings")
+    .eq("id", profile.tenant_id)
+    .maybeSingle();
+  const settings = (tenant?.settings ?? {}) as Record<string, unknown>;
+  const { error } = await supabase
+    .from("tenants")
+    .update({
+      settings: {
+        ...settings,
+        recurring_enabled: input.recurringEnabled,
+        auto_confirm: input.autoConfirm,
+      } as Json,
+    })
+    .eq("id", profile.tenant_id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
+
 /** Send a test email to the owner to confirm delivery works. */
 export async function testEmailSettings(
   to: string,

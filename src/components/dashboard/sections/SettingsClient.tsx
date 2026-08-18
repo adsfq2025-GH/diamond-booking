@@ -4,9 +4,14 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { PLANS, PLAN_ORDER } from "@/lib/plans";
 import { openBillingPortal, startCheckout } from "@/lib/actions/billing";
-import { saveBusinessProfile, saveEmailSettings, testEmailSettings } from "@/lib/actions/settings";
+import {
+  saveBookingSettings,
+  saveBusinessProfile,
+  saveEmailSettings,
+  testEmailSettings,
+} from "@/lib/actions/settings";
 import { COMMON_TIMEZONES } from "@/lib/onboarding/types";
-import type { BusinessProfile, EmailSettingsView } from "@/lib/dashboard/data";
+import type { BookingSettingsView, BusinessProfile, EmailSettingsView } from "@/lib/dashboard/data";
 import type { PlanTier } from "@/types/database";
 import { Icon, type IconName } from "../icons";
 import { Panel, PanelHeader } from "../ui";
@@ -15,10 +20,11 @@ import { inputBase, Label, SelectShell } from "@/components/ui/Field";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { ActionButton, GhostBtn, PreviewNotice } from "./shared";
 
-type TabKey = "profile" | "notifications" | "integrations" | "security" | "team" | "billing";
+type TabKey = "profile" | "bookings" | "notifications" | "integrations" | "security" | "team" | "billing";
 
 const TABS: Array<{ key: TabKey; label: string; icon: IconName }> = [
   { key: "profile", label: "Business profile", icon: "settings" },
+  { key: "bookings", label: "Booking rules", icon: "bookings" },
   { key: "notifications", label: "Notifications", icon: "bell" },
   { key: "integrations", label: "Integrations", icon: "widget" },
   { key: "security", label: "Security", icon: "user" },
@@ -36,12 +42,14 @@ export interface IntegrationFlags {
 export function SettingsClient({
   profile,
   email,
+  booking,
   plan,
   preview,
   integrations,
 }: {
   profile: BusinessProfile;
   email: EmailSettingsView;
+  booking: BookingSettingsView;
   plan: PlanTier;
   preview: boolean;
   integrations: IntegrationFlags;
@@ -92,6 +100,7 @@ export function SettingsClient({
 
         <div>
           {tab === "profile" && <ProfileTab profile={profile} preview={preview} />}
+          {tab === "bookings" && <BookingsTab booking={booking} preview={preview} />}
           {tab === "notifications" && <NotificationsTab plan={plan} />}
           {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} preview={preview} />}
           {tab === "security" && <SecurityTab />}
@@ -177,6 +186,62 @@ function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: b
         </div>
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
           <GhostBtn onClick={() => setForm(profile)}>Reset</GhostBtn>
+          <ActionButton icon="check" onClick={save}>
+            {busy ? "Saving…" : preview ? "Save (preview)" : "Save changes"}
+          </ActionButton>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function BookingsTab({ booking, preview }: { booking: BookingSettingsView; preview: boolean }) {
+  const [recurring, setRecurring] = useState(booking.recurringEnabled);
+  const [autoConfirm, setAutoConfirm] = useState(booking.autoConfirm);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setNotice(null);
+    const res = await saveBookingSettings({ recurringEnabled: recurring, autoConfirm });
+    setNotice(res.ok ? { ok: true, msg: "Booking rules saved." } : { ok: false, msg: res.error });
+    setBusy(false);
+  }
+
+  return (
+    <Panel>
+      <PanelHeader title="Booking rules" caption="How bookings are confirmed and repeated" />
+      <div className="space-y-5 px-5 py-5">
+        {notice && (
+          <div
+            className={cn(
+              "rounded-[12px] border px-4 py-3 text-[0.82rem]",
+              notice.ok
+                ? "border-success-500/30 bg-success-50 text-success-700"
+                : "border-[#e4b7b5] bg-[#fdf6f5] text-[#8c3531]",
+            )}
+          >
+            {notice.msg}
+          </div>
+        )}
+        <Toggle
+          id="set-recurring"
+          checked={recurring}
+          onChange={setRecurring}
+          label="Allow recurring bookings"
+          description="Let customers set a repeating schedule (weekly, every 2 weeks, monthly…) in the widget. Each occurrence is reserved on your calendar so the time stays blocked and can't be double-booked."
+        />
+        <div className="border-t border-line pt-5">
+          <Toggle
+            id="set-autoconfirm"
+            checked={autoConfirm}
+            onChange={setAutoConfirm}
+            label="Auto-confirm new bookings"
+            description="Open slots are booked instantly. Turn off to review and approve each request first."
+          />
+        </div>
+        <div className="flex items-center justify-end gap-3 border-t border-line pt-5">
           <ActionButton icon="check" onClick={save}>
             {busy ? "Saving…" : preview ? "Save (preview)" : "Save changes"}
           </ActionButton>

@@ -565,6 +565,8 @@ export const getBookingsData = cache(async (): Promise<BookingsData> => {
       addressLine: addr?.line1 ? [addr.line1, addr.city].filter(Boolean).join(", ") : null,
       notes: b.customer_notes,
       source: b.source,
+      recurrenceRule: b.recurrence_rule ?? null,
+      recurrenceGroupId: b.recurrence_group_id ?? null,
     };
   });
   return { bookings, counts };
@@ -578,7 +580,7 @@ export const getCalendarData = cache(async (): Promise<CalendarData> => {
   const [bookRes, svcMap, custMap, empMap] = await Promise.all([
     supabase
       .from("bookings")
-      .select("id, status, starts_at, ends_at, service_id, customer_id, employee_id")
+      .select("id, status, starts_at, ends_at, service_id, customer_id, employee_id, recurrence_rule")
       .eq("tenant_id", tenantId)
       .not("status", "in", "(cancelled,rescheduled)"),
     lookupServiceNames(supabase, tenantId),
@@ -599,6 +601,7 @@ export const getCalendarData = cache(async (): Promise<CalendarData> => {
       status: b.status,
       startsAt: b.starts_at,
       endsAt: b.ends_at,
+      recurrenceRule: b.recurrence_rule ?? null,
     };
   });
   return {
@@ -873,6 +876,29 @@ export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
     fromEmail: (smtp.fromEmail as string) || "",
     hasPassword: Boolean(smtp.pass),
     resendAvailable,
+  };
+});
+
+// ---------- Booking settings (Settings → Bookings) ----------
+
+export interface BookingSettingsView {
+  recurringEnabled: boolean;
+  autoConfirm: boolean;
+}
+
+export const getBookingSettings = cache(async (): Promise<BookingSettingsView> => {
+  if (!supabaseEnvConfigured()) return { recurringEnabled: true, autoConfirm: false };
+  const scope = await tenantScope();
+  if (!scope) return { recurringEnabled: false, autoConfirm: false };
+  const { data } = await scope.supabase
+    .from("tenants")
+    .select("settings")
+    .eq("id", scope.tenantId)
+    .maybeSingle();
+  const s = (data?.settings ?? {}) as TenantSettings;
+  return {
+    recurringEnabled: Boolean(s.recurring_enabled),
+    autoConfirm: s.auto_confirm === true || s.auto_confirm === "true",
   };
 });
 

@@ -163,6 +163,7 @@ export default async function OnboardingPage({
       cancellation_window_hours: Number(settings.cancellation_window_hours ?? 24),
       deposit_required: Boolean(settings.deposit_required),
       payments_enabled: Boolean(settings.payments_enabled),
+      recurring_enabled: settings.recurring_enabled !== false,
     },
   };
 

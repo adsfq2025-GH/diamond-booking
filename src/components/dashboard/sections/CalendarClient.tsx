@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { timeRange, zonedHourFraction, zonedYmd } from "@/lib/format";
+import { recurrenceLabel } from "@/lib/recurrence";
 import type { CalendarData, CalendarEvent } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Sheet } from "../Modal";
@@ -382,7 +383,12 @@ function EventBlock({
         opacity: faded ? 0.75 : 1,
       }}
     >
-      <p className="truncate text-[0.72rem] font-semibold text-ink">{ev.customerName}</p>
+      <p className="flex items-center gap-1 truncate text-[0.72rem] font-semibold text-ink">
+        {ev.recurrenceRule && ev.recurrenceRule !== "none" && (
+          <span aria-hidden title="Recurring" className="flex-none text-[0.7rem] leading-none">↻</span>
+        )}
+        <span className="truncate">{ev.customerName}</span>
+      </p>
       {height > 34 && (
         <p className="truncate text-[0.66rem] text-ink-muted">{ev.serviceName}</p>
       )}
@@ -504,6 +510,11 @@ function EventDetail({ e, tz }: { e: CalendarEvent; tz: string }) {
           {new Date(e.startsAt).toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })}
         </p>
         <p className="text-[0.82rem] text-ink-muted">{timeRange(e.startsAt, e.endsAt, tz)}</p>
+        {e.recurrenceRule && e.recurrenceRule !== "none" && (
+          <p className="mt-1.5 inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-blue-50 px-2 py-[2px] text-[0.68rem] font-semibold text-blue-700">
+            ↻ Repeats {recurrenceLabel(e.recurrenceRule).toLowerCase()}
+          </p>
+        )}
       </div>
       <p className="text-[0.82rem] leading-[1.6] text-ink-faint">
         Drag the appointment on the calendar to reschedule, or open it from

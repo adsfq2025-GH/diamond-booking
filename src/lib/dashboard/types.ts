@@ -164,6 +164,8 @@ export interface BookingView {
   addressLine: string | null;
   notes: string | null;
   source: string;
+  recurrenceRule: string | null;
+  recurrenceGroupId: string | null;
 }
 export interface BookingsData {
   bookings: BookingView[];
@@ -182,6 +184,7 @@ export interface CalendarEvent {
   status: BookingStatus;
   startsAt: string;
   endsAt: string;
+  recurrenceRule: string | null;
 }
 export interface CalendarData {
   events: CalendarEvent[];

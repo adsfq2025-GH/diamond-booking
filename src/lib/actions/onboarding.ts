@@ -328,6 +328,7 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
       ),
       deposit_required: input.deposit_required,
       payments_enabled: input.payments_enabled,
+      recurring_enabled: input.recurring_enabled,
       onboarding_complete: true,
       onboarding_step: 6,
     });

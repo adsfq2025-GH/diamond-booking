@@ -439,6 +439,9 @@ export interface Database {
           internal_notes: string | null;
           source: string;
           cancellation_reason: string | null;
+          recurrence_group_id: string | null;
+          recurrence_rule: string | null;
+          recurrence_until: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -458,6 +461,9 @@ export interface Database {
           internal_notes?: string | null;
           source?: string;
           cancellation_reason?: string | null;
+          recurrence_group_id?: string | null;
+          recurrence_rule?: string | null;
+          recurrence_until?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -477,6 +483,9 @@ export interface Database {
           internal_notes?: string | null;
           source?: string;
           cancellation_reason?: string | null;
+          recurrence_group_id?: string | null;
+          recurrence_rule?: string | null;
+          recurrence_until?: string | null;
           created_at?: string;
           updated_at?: string;
         };

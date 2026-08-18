@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getWidgetConfig } from "@/lib/widget/data";
+import { getWidgetConfig, getWidgetRecurringEnabled } from "@/lib/widget/data";
 import { emailWillSendForKey } from "@/lib/integrations/email";
 import { BookingFlow } from "@/components/widget/BookingFlow";
 
@@ -22,7 +22,10 @@ export default async function BookPage({
 
   const config = await getWidgetConfig(public_key);
   if (!config) notFound();
-  const emailWillSend = await emailWillSendForKey(public_key);
+  const [emailWillSend, recurringEnabled] = await Promise.all([
+    emailWillSendForKey(public_key),
+    getWidgetRecurringEnabled(public_key),
+  ]);
 
   return (
     <main
@@ -37,6 +40,7 @@ export default async function BookPage({
         config={config}
         embedded={embedded}
         emailWillSend={emailWillSend}
+        recurringEnabled={recurringEnabled}
       />
     </main>
   );
