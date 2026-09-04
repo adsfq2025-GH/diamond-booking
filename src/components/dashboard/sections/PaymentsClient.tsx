@@ -5,24 +5,20 @@ import { PLANS } from "@/lib/plans";
 import type { PaymentsData } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { PaymentStatusBadge, Panel, PanelHeader, StatCard } from "../ui";
-import { GhostBtn, PreviewNotice, TableWrap, Td, Th } from "./shared";
+import { GhostBtn, TableWrap, Td, Th } from "./shared";
 
 const KIND_LABEL = { payment: "Payment", deposit: "Deposit", refund: "Refund" } as const;
 
 export function PaymentsClient({
   data,
-  preview,
 }: {
   data: PaymentsData;
-  preview: boolean;
 }) {
   const sub = data.subscription;
   const plan = PLANS[sub.plan];
 
   return (
     <div>
-      {preview && <PreviewNotice />}
-
       {!sub.paymentsEnabled && (
         <div className="mb-5 flex flex-col gap-3 rounded-[16px] border border-gold-300 bg-gold-50 px-5 py-4 min-[561px]:flex-row min-[561px]:items-center min-[561px]:justify-between">
           <div className="flex items-start gap-3">

@@ -8,8 +8,6 @@
 import "server-only";
 import { supabaseEnvConfigured } from "@/lib/env";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { getMockServices } from "@/lib/dashboard/mock-data";
-import { MOCK } from "@/lib/dashboard/mock";
 import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
 import { computeOccurrences, type RecurrenceRule } from "@/lib/recurrence";
 import type {
@@ -29,11 +27,57 @@ const MOCK_HOURS = [
   { weekday: 6, open_time: "09:00", close_time: "15:00", closed: false },
 ];
 
+const PREVIEW_SERVICES: WidgetConfigPayload["services"] = [
+  {
+    id: "preview-service-standard-home-cleaning",
+    name: "Standard Home Cleaning",
+    description: "Routine home cleaning for kitchens, bathrooms, and common areas.",
+    category: "Cleaning",
+    duration_minutes: 120,
+    price_cents: 12000,
+    deposit_cents: 0,
+    addons: [
+      {
+        id: "preview-addon-fridge",
+        name: "Inside fridge",
+        price_cents: 2500,
+        duration_minutes: 20,
+      },
+      {
+        id: "preview-addon-oven",
+        name: "Inside oven",
+        price_cents: 2500,
+        duration_minutes: 20,
+      },
+    ],
+  },
+  {
+    id: "preview-service-deep-cleaning",
+    name: "Deep Cleaning",
+    description: "A top-to-bottom reset with extra detail work for the whole home.",
+    category: "Cleaning",
+    duration_minutes: 240,
+    price_cents: 24000,
+    deposit_cents: 5000,
+    addons: [],
+  },
+  {
+    id: "preview-service-office-cleaning",
+    name: "Office Cleaning",
+    description: "Recurring office upkeep for desks, floors, and shared spaces.",
+    category: "Commercial",
+    duration_minutes: 90,
+    price_cents: 15000,
+    deposit_cents: 0,
+    addons: [],
+  },
+];
+
 function mockConfig(): WidgetConfigPayload {
   return {
     tenant: {
       slug: "clean-sweep",
-      name: MOCK.tenantName,
+      name: "Clean Sweep Services",
       industry: "cleaning",
       timezone: "America/New_York",
       branding: { primary_color: "#2e86c1" },
@@ -43,21 +87,7 @@ function mockConfig(): WidgetConfigPayload {
       { key: "pets", label: "Any pets we should know about?", type: "text", required: false },
     ],
     business_hours: MOCK_HOURS,
-    services: getMockServices().map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      category: s.category,
-      duration_minutes: s.durationMinutes,
-      price_cents: s.priceCents,
-      deposit_cents: s.depositCents,
-      addons: s.addons.map((a) => ({
-        id: a.id,
-        name: a.name,
-        price_cents: a.priceCents,
-        duration_minutes: a.durationMinutes,
-      })),
-    })),
+    services: PREVIEW_SERVICES,
   };
 }
 

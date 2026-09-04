@@ -1,12 +1,8 @@
 /**
- * Dashboard data access. Every loader returns a view model from ./types so
- * pages never branch on the data source:
- *   - placeholder env  -> mock provider (mirrors seed.sql), for visual QA
- *   - real Supabase env -> typed, tenant-scoped queries (RLS enforces isolation)
- *
- * Aggregations are computed in TypeScript from fetched rows rather than in SQL
- * so the logic lives in one place and stays portable. Tenant scoping is always
- * explicit (`.eq("tenant_id", ...)`) even though RLS is the real guard.
+ * Dashboard data access using typed, tenant-scoped Supabase queries.
+ * Aggregations are computed in TypeScript so the logic lives in one place and
+ * tenant scoping stays explicit (`.eq("tenant_id", ...)`) even though RLS is
+ * the real guard.
  */
 
 import { cache } from "react";
@@ -16,7 +12,6 @@ import { getProfile } from "@/lib/auth";
 import { money, moneyCompact, percent, signedPercent } from "@/lib/format";
 import type { PlanTier } from "@/types/database";
 import type { TenantSettings } from "@/lib/onboarding/types";
-import { MOCK, MOCK_EMPLOYEES, getMockOverview } from "./mock";
 import type {
   ActivityItem,
   DashboardContext,
@@ -29,6 +24,8 @@ import type {
 } from "./types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TIMEZONE = "America/New_York";
+const DEFAULT_PLAN: PlanTier = "starter";
 
 function trialDaysRemaining(trialEndsAt: string | null): number | null {
   if (!trialEndsAt) return null;
@@ -39,30 +36,18 @@ function trialDaysRemaining(trialEndsAt: string | null): number | null {
 /** Chrome context: resolved once per request, shared by layout + pages. */
 export const getDashboardContext = cache(
   async (): Promise<DashboardContext> => {
-    if (!supabaseEnvConfigured()) {
-      return {
-        tenantName: MOCK.tenantName,
-        ownerName: MOCK.ownerName,
-        ownerEmail: MOCK.ownerEmail,
-        plan: MOCK.plan,
-        timezone: "America/New_York",
-        onboardingComplete: true,
-        trialDaysLeft: 7,
-        notificationCount: 3,
-      };
-    }
-
     const profile = await getProfile();
     const base: DashboardContext = {
       tenantName: "Your business",
       ownerName: profile?.full_name ?? "there",
       ownerEmail: profile?.email ?? "",
-      plan: "starter",
-      timezone: "America/New_York",
+      plan: DEFAULT_PLAN,
+      timezone: DEFAULT_TIMEZONE,
       onboardingComplete: false,
       trialDaysLeft: null,
       notificationCount: 0,
     };
+    if (!supabaseEnvConfigured()) return base;
     if (!profile?.tenant_id) return base;
 
     const supabase = await createClient();
@@ -78,7 +63,7 @@ export const getDashboardContext = cache(
       ...base,
       tenantName: tenant.name,
       plan: tenant.plan as PlanTier,
-      timezone: tenant.timezone || "America/New_York",
+      timezone: tenant.timezone || DEFAULT_TIMEZONE,
       onboardingComplete: Boolean(settings.onboarding_complete),
       trialDaysLeft:
         tenant.subscription_status === "trialing"
@@ -96,10 +81,14 @@ const MONTH_LABELS = [
 ];
 
 export const getOverview = cache(async (): Promise<OverviewData> => {
-  if (!supabaseEnvConfigured()) return getMockOverview();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Dashboard overview requires a configured Supabase environment.");
+  }
 
   const profile = await getProfile();
-  if (!profile?.tenant_id) return getMockOverview();
+  if (!profile?.tenant_id) {
+    throw new Error("Dashboard overview requires a tenant-scoped authenticated user.");
+  }
   const tenantId = profile.tenant_id;
   const supabase = await createClient();
 
@@ -346,34 +335,10 @@ async function lookupEmployees(
       color: row.color ?? "#7c8fa3",
     });
   }
-  // Fallback to mock employees if directory view is empty.
-  if (map.size === 0) {
-    for (const e of MOCK_EMPLOYEES) {
-      map.set(e.id, { id: e.id, name: e.name, color: e.color });
-    }
-  }
   return map;
 }
 
 // ---------- section loaders ----------
-//
-// Each returns the same view model in mock and live mode. The live queries are
-// tenant-scoped typed reads; aggregations are computed in JS. Until a real
-// Supabase project is connected they are exercised only by type-checking — the
-// mock path is what QA verifies.
-
-import {
-  getMockBookings,
-  getMockCalendar,
-  getMockCoupons,
-  getMockCustomers,
-  getMockInvoices,
-  getMockPayments,
-  getMockReports,
-  getMockServices,
-  getMockTeam,
-  getMockWidget,
-} from "./mock-data";
 import type {
   BookingsData,
   CalendarData,
@@ -395,9 +360,13 @@ async function tenantScope() {
 }
 
 export const getServices = cache(async (): Promise<ServiceView[]> => {
-  if (!supabaseEnvConfigured()) return getMockServices();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Services dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockServices();
+  if (!scope) {
+    throw new Error("Services dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
 
   const [svcRes, addonRes, empSvcRes, bookRes] = await Promise.all([
@@ -436,9 +405,13 @@ export const getServices = cache(async (): Promise<ServiceView[]> => {
 });
 
 export const getCustomers = cache(async (): Promise<CustomerView[]> => {
-  if (!supabaseEnvConfigured()) return getMockCustomers();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Customers dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockCustomers();
+  if (!scope) {
+    throw new Error("Customers dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
 
   const [custRes, bookRes] = await Promise.all([
@@ -478,9 +451,13 @@ export const getCustomers = cache(async (): Promise<CustomerView[]> => {
 });
 
 export const getTeam = cache(async (): Promise<import("./types").EmployeeView[]> => {
-  if (!supabaseEnvConfigured()) return getMockTeam();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Team dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockTeam();
+  if (!scope) {
+    throw new Error("Team dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
 
   const [empRes, dirRes, bookRes, svcRes] = await Promise.all([
@@ -531,9 +508,13 @@ export const getTeam = cache(async (): Promise<import("./types").EmployeeView[]>
 });
 
 export const getBookingsData = cache(async (): Promise<BookingsData> => {
-  if (!supabaseEnvConfigured()) return getMockBookings();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Bookings dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockBookings();
+  if (!scope) {
+    throw new Error("Bookings dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
 
   const [bookRes, svcMap, custMap, empMap] = await Promise.all([
@@ -573,9 +554,13 @@ export const getBookingsData = cache(async (): Promise<BookingsData> => {
 });
 
 export const getCalendarData = cache(async (): Promise<CalendarData> => {
-  if (!supabaseEnvConfigured()) return getMockCalendar();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Calendar dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockCalendar();
+  if (!scope) {
+    throw new Error("Calendar dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
   const [bookRes, svcMap, custMap, empMap] = await Promise.all([
     supabase
@@ -611,9 +596,13 @@ export const getCalendarData = cache(async (): Promise<CalendarData> => {
 });
 
 export const getInvoicesData = cache(async (): Promise<InvoicesData> => {
-  if (!supabaseEnvConfigured()) return getMockInvoices();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Invoices dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockInvoices();
+  if (!scope) {
+    throw new Error("Invoices dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
   const [invRes, custMap] = await Promise.all([
     supabase.from("invoices").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }),
@@ -644,9 +633,13 @@ export const getInvoicesData = cache(async (): Promise<InvoicesData> => {
 });
 
 export const getPaymentsData = cache(async (): Promise<PaymentsData> => {
-  if (!supabaseEnvConfigured()) return getMockPayments();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Payments dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockPayments();
+  if (!scope) {
+    throw new Error("Payments dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
   const [payRes, custMap, invRes, tenantRes] = await Promise.all([
     supabase.from("payments").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }),
@@ -689,9 +682,13 @@ export const getReportsData = cache(async (): Promise<ReportsData> => {
   // Reports aggregation is non-trivial; the mock provides a full-fidelity
   // dataset. The live version reuses the overview's monthly rollups plus the
   // section reads, computed in JS.
-  if (!supabaseEnvConfigured()) return getMockReports();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Reports dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockReports();
+  if (!scope) {
+    throw new Error("Reports dashboard requires a tenant-scoped authenticated user.");
+  }
   const [overview, services, team, bookings, customers] = await Promise.all([
     getOverview(),
     getServices(),
@@ -727,9 +724,13 @@ export const getReportsData = cache(async (): Promise<ReportsData> => {
 });
 
 export const getCoupons = cache(async (): Promise<CouponView[]> => {
-  if (!supabaseEnvConfigured()) return getMockCoupons();
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Marketing dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockCoupons();
+  if (!scope) {
+    throw new Error("Marketing dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
   const { data } = await supabase.from("coupons").select("*").eq("tenant_id", tenantId);
   return (data ?? []).map((c) => ({
@@ -746,16 +747,22 @@ export const getCoupons = cache(async (): Promise<CouponView[]> => {
 
 export const getWidgetData = cache(async (): Promise<WidgetData> => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://diamond-booking.com";
-  if (!supabaseEnvConfigured()) return getMockWidget(appUrl);
+  if (!supabaseEnvConfigured()) {
+    throw new Error("Widget dashboard requires a configured Supabase environment.");
+  }
   const scope = await tenantScope();
-  if (!scope) return getMockWidget(appUrl);
+  if (!scope) {
+    throw new Error("Widget dashboard requires a tenant-scoped authenticated user.");
+  }
   const { supabase, tenantId } = scope;
   const { data } = await supabase
     .from("widget_configs")
     .select("*")
     .eq("tenant_id", tenantId)
     .maybeSingle();
-  if (!data) return getMockWidget(appUrl);
+  if (!data) {
+    throw new Error(`Widget configuration is missing for tenant ${tenantId}.`);
+  }
   const theme = (data.theme ?? {}) as { primary_color?: string; radius?: string; layout?: string };
   const fields = (data.custom_fields as Array<{ key: string; label: string; type: string; required: boolean }>) ?? [];
   const domains = (data.allowed_domains as string[] | null) ?? [];
@@ -787,15 +794,15 @@ export interface BusinessProfile {
 
 export const getBusinessProfile = cache(async (): Promise<BusinessProfile> => {
   const fallback: BusinessProfile = {
-    name: MOCK.tenantName,
-    industry: "Cleaning",
-    email: MOCK.ownerEmail,
+    name: "",
+    industry: "",
+    email: "",
     phone: "",
     street: "",
     city: "",
     state: "",
     zip: "",
-    timezone: "America/New_York",
+    timezone: DEFAULT_TIMEZONE,
   };
   if (!supabaseEnvConfigured()) return fallback;
   const scope = await tenantScope();
@@ -822,7 +829,7 @@ export const getBusinessProfile = cache(async (): Promise<BusinessProfile> => {
     city: addr.city ?? "",
     state: addr.state ?? "",
     zip: addr.zip ?? "",
-    timezone: data.timezone || "America/New_York",
+    timezone: data.timezone || DEFAULT_TIMEZONE,
   };
 });
 
@@ -854,7 +861,7 @@ export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
     port: 587,
     secure: false,
     user: "",
-    fromName: MOCK.tenantName,
+    fromName: "",
     fromEmail: "",
     hasPassword: false,
     resendAvailable,

@@ -7,14 +7,12 @@ import type { CustomerView } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Avatar, Panel, EmptyState } from "../ui";
 import { Sheet } from "../Modal";
-import { ActionButton, PreviewNotice, TableWrap, Td, Th, Toolbar } from "./shared";
+import { ActionButton, TableWrap, Td, Th, Toolbar } from "./shared";
 
 export function CustomersClient({
   initial,
-  preview,
 }: {
   initial: CustomerView[];
-  preview: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<CustomerView | null>(null);
@@ -35,7 +33,6 @@ export function CustomersClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
       <Toolbar
         search={query}
         onSearch={setQuery}

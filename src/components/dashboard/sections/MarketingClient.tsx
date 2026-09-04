@@ -8,7 +8,7 @@ import { Icon, type IconName } from "../icons";
 import { Panel, PanelHeader, EmptyState } from "../ui";
 import { Modal } from "../Modal";
 import { inputBase, Label, SelectShell } from "@/components/ui/Field";
-import { ActionButton, GhostBtn, PreviewNotice, TableWrap, Td, Th, Toolbar } from "./shared";
+import { ActionButton, GhostBtn, TableWrap, Td, Th, Toolbar } from "./shared";
 
 type Draft = {
   code: string;
@@ -19,10 +19,8 @@ type Draft = {
 
 export function MarketingClient({
   initial,
-  preview,
 }: {
   initial: CouponView[];
-  preview: boolean;
 }) {
   const [coupons, setCoupons] = useState(initial);
   const [creating, setCreating] = useState(false);
@@ -50,8 +48,6 @@ export function MarketingClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
-
       <Toolbar action={<ActionButton onClick={() => setCreating(true)}>New coupon</ActionButton>}>
         <span className="text-[0.8rem] text-ink-faint">
           {coupons.filter((c) => c.active).length} active promotions
@@ -122,7 +118,7 @@ export function MarketingClient({
         />
       </div>
 
-      {creating && <CouponModal preview={preview} onClose={() => setCreating(false)} onSave={add} />}
+      {creating && <CouponModal onClose={() => setCreating(false)} onSave={add} />}
     </div>
   );
 }
@@ -147,11 +143,9 @@ function ComingCard({ icon, title, body }: { icon: IconName; title: string; body
 }
 
 function CouponModal({
-  preview,
   onClose,
   onSave,
 }: {
-  preview: boolean;
   onClose: () => void;
   onSave: (d: Draft) => void;
 }) {
@@ -162,7 +156,7 @@ function CouponModal({
     <Modal
       onClose={onClose}
       title="New coupon"
-      description={preview ? "Preview mode — changes won't be saved." : "Create a discount code"}
+      description="Create a discount code"
       footer={
         <>
           <GhostBtn onClick={onClose}>Cancel</GhostBtn>

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { supabaseEnvConfigured } from "@/lib/env";
 import { getCoupons, getDashboardContext } from "@/lib/dashboard/data";
 import { hasFeature } from "@/lib/plans";
 import { MarketingClient } from "@/components/dashboard/sections/MarketingClient";
@@ -18,5 +17,5 @@ export default async function MarketingPage() {
       />
     );
   }
-  return <MarketingClient initial={coupons} preview={!supabaseEnvConfigured()} />;
+  return <MarketingClient initial={coupons} />;
 }

@@ -6,16 +6,14 @@ import type { WidgetData } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Panel, PanelHeader } from "../ui";
 import { inputBase, Label } from "@/components/ui/Field";
-import { GhostBtn, PreviewNotice } from "./shared";
+import { GhostBtn } from "./shared";
 
 const SWATCHES = ["#2e86c1", "#0c2440", "#3fb68b", "#8e6bbf", "#e07a5f", "#f4b942"];
 
 export function WidgetClient({
   data,
-  preview,
 }: {
   data: WidgetData;
-  preview: boolean;
 }) {
   const [color, setColor] = useState(data.primaryColor);
   const [radius, setRadius] = useState(parseInt(data.radius) || 12);
@@ -33,8 +31,6 @@ export function WidgetClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
-
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         {/* Controls */}
         <div className="space-y-5 lg:col-span-3">

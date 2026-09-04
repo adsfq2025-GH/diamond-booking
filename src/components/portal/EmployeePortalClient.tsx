@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { money, relativeDay, shortDate, timeRange } from "@/lib/format";
-import type { EmployeePortal, EmpJob } from "@/lib/portal/data";
+import type { EmployeePortal, EmpJob } from "@/lib/portal/types";
 import { WEEKDAY_LABELS } from "@/lib/onboarding/types";
 import { Icon } from "@/components/dashboard/icons";
 import { BookingStatusBadge, Panel, PanelHeader, StatCard, EmptyState } from "@/components/dashboard/ui";
-import { PreviewNotice } from "@/components/dashboard/sections/shared";
 
 type Tab = "schedule" | "earnings" | "availability" | "requests";
 const TABS: Array<{ key: Tab; label: string }> = [
@@ -19,17 +18,13 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export function EmployeePortalClient({
   data,
-  preview,
 }: {
   data: EmployeePortal;
-  preview: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("schedule");
 
   return (
     <div>
-      {preview && <PreviewNotice>You&rsquo;re viewing a demo employee account. Connect Supabase to see your real schedule.</PreviewNotice>}
-
       <div className="mb-6">
         <h1 className="font-display text-[clamp(1.4rem,3.5vw,1.9rem)] font-bold tracking-[-0.03em] text-ink">
           Hi, {data.name.split(" ")[0]}.
@@ -62,7 +57,7 @@ export function EmployeePortalClient({
       {tab === "schedule" && <ScheduleTab data={data} />}
       {tab === "earnings" && <EarningsTab data={data} />}
       {tab === "availability" && <AvailabilityTab data={data} />}
-      {tab === "requests" && <RequestsTab data={data} preview={preview} />}
+      {tab === "requests" && <RequestsTab data={data} />}
     </div>
   );
 }
@@ -222,7 +217,7 @@ function AvailabilityTab({ data }: { data: EmployeePortal }) {
   );
 }
 
-function RequestsTab({ data, preview }: { data: EmployeePortal; preview: boolean }) {
+function RequestsTab({ data }: { data: EmployeePortal }) {
   return (
     <Panel>
       <PanelHeader
@@ -232,7 +227,6 @@ function RequestsTab({ data, preview }: { data: EmployeePortal; preview: boolean
           <button
             type="button"
             className="rounded-[9px] bg-navy-900 px-3.5 py-2 text-[0.8rem] font-semibold text-white transition-colors hover:bg-navy-800"
-            title={preview ? "Preview mode" : undefined}
           >
             New request
           </button>

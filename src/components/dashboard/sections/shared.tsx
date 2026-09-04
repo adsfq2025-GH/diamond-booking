@@ -116,20 +116,25 @@ export function ActionButton({
   onClick,
   icon = "plus",
   type = "button",
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   icon?: IconName;
   type?: "button" | "submit";
+  disabled?: boolean;
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         "group inline-flex items-center justify-center gap-2 rounded-[10px] border border-transparent px-4 py-2.5 text-[0.84rem] font-semibold whitespace-nowrap",
         "bg-[linear-gradient(180deg,var(--gold-400)_0%,var(--gold-500)_55%,var(--gold-600)_100%)] text-navy-950 shadow-[var(--shadow-gold)]",
-        "transition-[transform,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-gold-hover)]",
+        disabled
+          ? "cursor-not-allowed opacity-60 shadow-none"
+          : "transition-[transform,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-expo)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-gold-hover)]",
       )}
     >
       <Icon name={icon} className="h-4 w-4" />

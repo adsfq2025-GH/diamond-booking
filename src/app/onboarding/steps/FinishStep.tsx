@@ -197,6 +197,16 @@ export function FinishStep({
         </div>
       </div>
 
+      <div className="mt-5 rounded-[14px] border border-blue-200 bg-blue-50/70 p-4 min-[521px]:p-5">
+        <p className="text-[0.82rem] font-semibold text-navy-900">Before you finish</p>
+        <ul className="mt-3 space-y-2 text-[0.8rem] leading-[1.6] text-navy-800">
+          <li>• Make sure at least one service has the right duration, price, and deposit.</li>
+          <li>• Confirm your business hours match when customers can really book.</li>
+          <li>• Add your logo and brand color so the booking page feels trustworthy.</li>
+          <li>• If payments stay on, connect Stripe in the dashboard before going fully live.</li>
+        </ul>
+      </div>
+
       <StepFooter
         busy={busy}
         onBack={onBack}

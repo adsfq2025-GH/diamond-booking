@@ -19,30 +19,20 @@ import {
 } from "../auth-ui";
 import { signIn, type AuthFormState } from "@/lib/actions/auth";
 import { cn } from "@/lib/cn";
-
-const roles = [
-  { key: "business", label: "Business", caption: "Sign in to run your business." },
-  { key: "team", label: "Team", caption: "Sign in to see your day sheet." },
-  { key: "customer", label: "Customer", caption: "Sign in to manage your bookings." },
-  { key: "admin", label: "Admin", caption: "Platform administration sign-in." },
-] as const;
-
-type RoleKey = (typeof roles)[number]["key"];
+import { Icon } from "@/components/dashboard/icons";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
-  const [role, setRole] = useState<RoleKey>("business");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const { phase, begin } = useConnectPhase();
   const [state, formAction, isPending] = useActionState<AuthFormState, FormData>(
     signIn,
     null,
   );
-
-  const active = roles.find((r) => r.key === role)!;
   const configured = supabaseConfigured();
   const busy = isPending || phase === "connecting";
 
@@ -66,36 +56,12 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
 
   return (
     <AuthCard>
-      {/* role segmented control (visual only — routing is role-derived server-side) */}
-      <div
-        role="group"
-        aria-label="Account type"
-        className="mb-7 grid grid-cols-4 gap-1 rounded-[12px] border border-line bg-surface-alt p-1"
-      >
-        {roles.map((r) => (
-          <button
-            key={r.key}
-            type="button"
-            aria-pressed={role === r.key}
-            onClick={() => setRole(r.key)}
-            className={cn(
-              "cursor-pointer rounded-[9px] px-1 py-[7px] text-[0.74rem] font-semibold",
-              "transition-[background-color,color,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-expo)]",
-              "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-600",
-              role === r.key
-                ? "bg-card text-ink shadow-[0_1px_3px_rgb(12_36_64/0.12)]"
-                : "text-ink-faint hover:text-ink-muted",
-            )}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
-
       <h1 className="font-display mb-1.5 text-[1.6rem] leading-[1.15] font-bold tracking-[-0.02em]">
         Welcome <Em>back.</Em>
       </h1>
-      <p className="mb-7 text-[0.88rem] font-light text-ink-muted">{active.caption}</p>
+      <p className="mb-7 text-[0.88rem] font-light text-ink-muted">
+        Enter your email and password and Diamond will route you to the right workspace automatically.
+      </p>
 
       <AuthError>{state?.error}</AuthError>
 
@@ -135,21 +101,32 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           >
             Password
           </Label>
-          <input
-            id="login-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            placeholder="••••••••••"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (errors.password) setErrors((er) => ({ ...er, password: undefined }));
-            }}
-            aria-invalid={Boolean(errors.password)}
-            aria-describedby={errors.password ? "login-password-error" : undefined}
-            className={cn(inputBase, errors.password && inputInvalid)}
-          />
+          <div className="relative">
+            <input
+              id="login-password"
+              name="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              placeholder="••••••••••"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (errors.password) setErrors((er) => ({ ...er, password: undefined }));
+              }}
+              aria-invalid={Boolean(errors.password)}
+              aria-describedby={errors.password ? "login-password-error" : undefined}
+              className={cn(inputBase, "pr-11", errors.password && inputInvalid)}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((value) => !value)}
+              className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[10px] text-ink-faint transition-colors duration-[var(--duration-fast)] hover:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            >
+              <Icon name={showPassword ? "eyeOff" : "eye"} className="h-[17px] w-[17px]" />
+            </button>
+          </div>
           <FieldError id="login-password-error">{errors.password}</FieldError>
         </div>
 

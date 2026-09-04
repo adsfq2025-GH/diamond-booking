@@ -7,21 +7,18 @@ import type { EmployeeView } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Avatar, Meter, Panel, EmptyState } from "../ui";
 import { Sheet } from "../Modal";
-import { ActionButton, PreviewNotice, Toolbar } from "./shared";
+import { ActionButton, Toolbar } from "./shared";
 
 export function TeamClient({
   initial,
-  preview,
 }: {
   initial: EmployeeView[];
-  preview: boolean;
 }) {
   const [selected, setSelected] = useState<EmployeeView | null>(null);
   const active = initial.filter((e) => e.active).length;
 
   return (
     <div>
-      {preview && <PreviewNotice />}
       <Toolbar action={<ActionButton icon="plus">Invite teammate</ActionButton>}>
         <span className="text-[0.8rem] text-ink-faint">
           {active} active · {initial.length} total

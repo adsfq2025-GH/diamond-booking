@@ -37,7 +37,9 @@ export type IconName =
   | "external"
   | "sparkle"
   | "download"
-  | "filter";
+  | "filter"
+  | "eye"
+  | "eyeOff";
 
 const PATHS: Record<IconName, React.ReactNode> = {
   overview: (
@@ -184,6 +186,20 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   filter: (
     <path d="M4 5h16l-6 7v6l-4-2v-4z" strokeLinejoin="round" />
+  ),
+  eye: (
+    <>
+      <path d="M2.8 12s3.5-6 9.2-6 9.2 6 9.2 6-3.5 6-9.2 6-9.2-6-9.2-6z" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.8" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <path d="M3 3l18 18" strokeLinecap="round" />
+      <path d="M10.6 6.2A10.7 10.7 0 0 1 12 6c5.7 0 9.2 6 9.2 6a17 17 0 0 1-3.1 3.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.5 6.8C4.1 8.4 2.8 12 2.8 12s3.5 6 9.2 6c1.5 0 2.8-.3 4-.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.3 10.3A2.4 2.4 0 0 0 9.6 12a2.4 2.4 0 0 0 2.4 2.4c.6 0 1.2-.2 1.7-.7" strokeLinecap="round" strokeLinejoin="round" />
+    </>
   ),
 };
 

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { supabaseEnvConfigured } from "@/lib/env";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -11,7 +10,6 @@ import {
   type WizardData,
 } from "@/lib/onboarding/types";
 import { OnboardingWizard } from "./OnboardingWizard";
-import { MOCK_OWNER_NAME, MOCK_PUBLIC_KEY, mockWizardData } from "./mock";
 
 export const metadata: Metadata = {
   title: "Set up your business",
@@ -32,33 +30,10 @@ export default async function OnboardingPage({
 }) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  // ---------- PLACEHOLDER-ENV PREVIEW MODE ----------
-  // No real Supabase keys: render the wizard against an in-memory mock
-  // tenant so every step is visually testable. ?step=N jumps straight to a
-  // step (7 = the finished widget panel). Gated on supabaseEnvConfigured —
-  // with real keys this branch is unreachable.
-  if (!supabaseEnvConfigured()) {
-    const { step } = await searchParams;
-    const parsed = Number.parseInt(step ?? "1", 10);
-    const initialStep = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 7) : 1;
-
-    return (
-      <OnboardingWizard
-        mode="mock"
-        initialStep={initialStep}
-        initialData={mockWizardData()}
-        tenantId=""
-        publicKey={MOCK_PUBLIC_KEY}
-        appUrl={appUrl}
-        ownerName={MOCK_OWNER_NAME}
-      />
-    );
-  }
-
-  // ---------- LIVE MODE ----------
   const profile = await requireRole("business_owner");
   const supabase = await createClient();
   const tenantId = profile.tenant_id!;
+  const { step } = await searchParams;
 
   const [
     { data: tenant },
@@ -167,14 +142,16 @@ export default async function OnboardingPage({
     },
   };
 
-  // Resume where they left off; completed onboarding opens the widget panel.
-  const initialStep = settings.onboarding_complete
+  const parsed = Number.parseInt(step ?? "", 10);
+  const persistedStep = settings.onboarding_complete
     ? 7
     : Math.min(Math.max(Number(settings.onboarding_step ?? 1), 1), 6);
+  const initialStep = Number.isFinite(parsed)
+    ? Math.min(Math.max(parsed, 1), 7)
+    : persistedStep;
 
   return (
     <OnboardingWizard
-      mode="live"
       initialStep={initialStep}
       initialData={data}
       tenantId={tenantId}

@@ -13,14 +13,12 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 export function BrandingStep({
   value,
-  mode,
   tenantId,
   busy,
   onSubmit,
   onBack,
 }: {
   value: BrandingInput;
-  mode: "live" | "mock";
   tenantId: string;
   busy: boolean;
   onSubmit: (next: BrandingInput) => void;
@@ -32,17 +30,9 @@ export function BrandingStep({
   const logoInput = useRef<HTMLInputElement>(null);
   const photosInput = useRef<HTMLInputElement>(null);
 
-  /**
-   * Live mode: upload to the public `branding` bucket under the
-   * tenant-scoped path RLS expects ({tenant_id}/...). Mock mode: preview
-   * with an in-memory object URL — nothing leaves the browser.
-   */
   const uploadFile = async (file: File, kind: "logo" | "photo") => {
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
       throw new Error(`"${file.name}" is over ${MAX_FILE_MB}MB — resize it and retry.`);
-    }
-    if (mode === "mock") {
-      return URL.createObjectURL(file);
     }
     const supabase = createClient();
     const ext = (file.name.split(".").pop() || "png").toLowerCase();

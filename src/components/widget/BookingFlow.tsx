@@ -111,6 +111,20 @@ export function BookingFlow({
         )}
 
         <div className="px-5 py-5">
+          {step < 3 && (
+            <div className="mb-4 rounded-[12px] border border-line bg-surface-alt/50 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[0.72rem] font-bold tracking-[0.14em] text-ink-faint uppercase">Why customers book here</p>
+                  <p className="mt-1 text-[0.82rem] leading-[1.55] text-ink-muted">
+                    Real-time availability, instant confirmation rules, and no double bookings.
+                  </p>
+                </div>
+                {tz && <span className="rounded-[var(--radius-pill)] bg-card px-2.5 py-1 text-[0.68rem] font-semibold text-ink-faint">Times shown in {tz}</span>}
+              </div>
+            </div>
+          )}
+
           {step === 0 && (
             <ServiceStep
               services={config.services}
@@ -323,6 +337,14 @@ function ServiceStep({
         </div>
       )}
 
+      {selected && (
+        <div className="mt-3 rounded-[12px] border border-line bg-card px-4 py-3 text-[0.76rem] leading-[1.6] text-ink-muted">
+          {selected.deposit_cents > 0
+            ? `A ${money(selected.deposit_cents)} deposit may be collected after confirmation, depending on this business's payment setup.`
+            : "No deposit is required for this service unless the business updates its payment policy later."}
+        </div>
+      )}
+
       <PrimaryBtn accent={accent} disabled={!selected} onClick={onNext} className="mt-3">
         Continue
       </PrimaryBtn>
@@ -409,6 +431,7 @@ function TimeStep({
       </div>
 
       <p className="mt-5 mb-3 text-[0.8rem] font-semibold text-ink">Available times</p>
+      {tz && <p className="mb-3 text-[0.74rem] text-ink-faint">All appointment times are shown in {tz}.</p>}
       {loading ? (
         <div className="grid grid-cols-3 gap-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -583,14 +606,38 @@ function DetailsStep({
           ariaLabel="Service address"
         />
         {customFields.map((f) => (
-          <input
-            key={f.key}
-            className={input}
-            style={focusRing(accent)}
-            placeholder={f.label + (f.required ? " *" : "")}
-            value={custom[f.key] ?? ""}
-            onChange={(e) => onCustom(f.key, e.target.value)}
-          />
+          <div key={f.key}>
+            <label className="mb-1 block text-[0.76rem] font-semibold text-ink">
+              {f.label}
+              {f.required ? " *" : ""}
+            </label>
+            {f.type === "textarea" ? (
+              <textarea
+                className={cn(input, "min-h-[64px] resize-y")}
+                style={focusRing(accent)}
+                value={custom[f.key] ?? ""}
+                onChange={(e) => onCustom(f.key, e.target.value)}
+              />
+            ) : f.type === "checkbox" ? (
+              <label className="flex items-center gap-2 rounded-[10px] border border-line-strong px-3.5 py-2.5 text-[0.84rem] text-ink">
+                <input
+                  type="checkbox"
+                  checked={custom[f.key] === "yes"}
+                  onChange={(e) => onCustom(f.key, e.target.checked ? "yes" : "")}
+                />
+                Yes
+              </label>
+            ) : (
+              <input
+                className={input}
+                style={focusRing(accent)}
+                type={f.type === "phone" ? "tel" : "text"}
+                placeholder={f.label + (f.required ? " *" : "")}
+                value={custom[f.key] ?? ""}
+                onChange={(e) => onCustom(f.key, e.target.value)}
+              />
+            )}
+          </div>
         ))}
         <textarea
           className={cn(input, "min-h-[64px] resize-y")}
@@ -608,6 +655,10 @@ function DetailsStep({
           </span>
         </div>
       )}
+
+      <div className="mt-3 rounded-[10px] border border-line bg-surface-alt/40 px-3.5 py-3 text-[0.76rem] leading-[1.55] text-ink-muted">
+        By confirming, you agree to the business cancellation and rescheduling policy shown on the booking page.
+      </div>
 
       {error && <p className="mt-3 text-[0.8rem] font-medium text-[#a63d39]">{error}</p>}
 
@@ -682,6 +733,21 @@ function DoneStep({
           <>Please save these details for your records.</>
         )}
       </p>
+      <div className="mt-5 grid gap-2 text-left min-[420px]:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-[10px] border border-line-strong px-4 py-2.5 text-[0.82rem] font-semibold text-ink transition-colors hover:border-blue-600 hover:text-blue-600"
+        >
+          Book another service
+        </button>
+        <a
+          href={`mailto:${email}`}
+          className="rounded-[10px] bg-surface-alt px-4 py-2.5 text-center text-[0.82rem] font-semibold text-ink transition-colors hover:bg-surface-alt/80"
+        >
+          Email these details to me
+        </a>
+      </div>
     </div>
   );
 }

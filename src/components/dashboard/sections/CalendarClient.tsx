@@ -8,7 +8,6 @@ import type { CalendarData, CalendarEvent } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { Sheet } from "../Modal";
 import { BookingStatusBadge } from "../ui";
-import { PreviewNotice } from "./shared";
 
 type ViewMode = "day" | "week" | "month";
 
@@ -41,11 +40,9 @@ function ymdLocal(d: Date) {
 export function CalendarClient({
   data,
   timezone,
-  preview,
 }: {
   data: CalendarData;
   timezone: string;
-  preview: boolean;
 }) {
   const [events, setEvents] = useState(data.events);
   const [view, setView] = useState<ViewMode>("week");
@@ -99,8 +96,6 @@ export function CalendarClient({
 
   return (
     <div>
-      {preview && <PreviewNotice>Drag any appointment to reschedule it. In preview mode, moves are not saved.</PreviewNotice>}
-
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <button

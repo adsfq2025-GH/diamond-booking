@@ -4,10 +4,9 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { money, relativeDay, shortDate, timeRange } from "@/lib/format";
 import { cancelMyBooking } from "@/lib/actions/bookings";
-import type { CustomerPortal, CustBooking } from "@/lib/portal/data";
+import type { CustomerPortal, CustBooking } from "@/lib/portal/types";
 import { Icon } from "@/components/dashboard/icons";
 import { Avatar, BookingStatusBadge, InvoiceStatusBadge, Panel, PanelHeader, EmptyState } from "@/components/dashboard/ui";
-import { PreviewNotice } from "@/components/dashboard/sections/shared";
 
 type Tab = "upcoming" | "history" | "invoices" | "profile";
 const TABS: Array<{ key: Tab; label: string }> = [
@@ -19,10 +18,8 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 export function CustomerPortalClient({
   data,
-  preview,
 }: {
   data: CustomerPortal;
-  preview: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("upcoming");
   const [upcoming, setUpcoming] = useState(data.upcoming);
@@ -30,13 +27,11 @@ export function CustomerPortalClient({
 
   async function cancel(id: string) {
     setUpcoming((prev) => prev.filter((b) => b.id !== id));
-    if (!preview) await cancelMyBooking(id);
+    await cancelMyBooking(id);
   }
 
   return (
     <div>
-      {preview && <PreviewNotice>You&rsquo;re viewing a demo customer account. Connect Supabase to see your real bookings.</PreviewNotice>}
-
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-[clamp(1.4rem,3.5vw,1.9rem)] font-bold tracking-[-0.03em] text-ink">

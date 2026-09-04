@@ -20,6 +20,7 @@ export function WidgetReveal({
   businessName: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const snippet = `<script src="${appUrl}/embed.js" data-key="${publicKey}" async></script>`;
   const bookingUrl = `${appUrl}/book/${publicKey}`;
@@ -32,6 +33,14 @@ export function WidgetReveal({
     } catch {
       // Clipboard unavailable (permissions/iframe) — user can select manually.
     }
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(bookingUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2200);
+    } catch {}
   };
 
   return (
@@ -58,6 +67,12 @@ export function WidgetReveal({
           Paste this one line into your website — the booking widget appears
           instantly, styled with your brand, no double bookings possible.
         </p>
+      </div>
+
+      <div className="mb-5 grid gap-3 min-[641px]:grid-cols-3">
+        <LaunchStat label="Booking link" value="Ready" detail="Hosted page is available now" />
+        <LaunchStat label="Embed code" value="Ready" detail="Copy once and paste into your site" />
+        <LaunchStat label="Next step" value="Test book" detail="Run one real booking before launch" />
       </div>
 
       {/* Embed snippet */}
@@ -114,12 +129,42 @@ export function WidgetReveal({
         />
       </div>
 
-      <div className="mb-7">
+      <div className="mb-5 rounded-[14px] border border-line bg-card px-4 py-4">
+        <div className="flex flex-col gap-3 min-[641px]:flex-row min-[641px]:items-center min-[641px]:justify-between">
+          <div className="min-w-0">
+            <p className="text-[0.72rem] font-bold tracking-[0.14em] text-ink-faint uppercase">Hosted booking link</p>
+            <p className="mt-1 truncate font-mono text-[0.8rem] text-ink">{bookingUrl}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={copyLink}
+              className="inline-flex items-center justify-center rounded-[9px] border border-line-strong px-3.5 py-2 text-[0.78rem] font-semibold text-ink transition-colors hover:border-blue-600 hover:text-blue-600"
+            >
+              {linkCopied ? "Link copied" : "Copy link"}
+            </button>
+            <a
+              href={bookingUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center rounded-[9px] bg-navy-900 px-3.5 py-2 text-[0.78rem] font-semibold text-white transition-colors hover:bg-navy-800"
+            >
+              Open booking page
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-7 space-y-3">
         <InfoNote>
-          <b className="font-semibold">Preview note:</b> the hosted booking
-          page at <code className="rounded bg-navy-900/6 px-1 py-[1px] font-mono text-[0.72rem]">/book/…</code>{" "}
-          ships in the widget phase — until then the frame above may show a
-          404. Your embed key is live and permanent either way.
+          <b className="font-semibold">Launch tip:</b> open the hosted booking
+          page, make one test booking, and then embed the snippet on your site.
+          That gives you confidence your hours, services, and confirmation rules
+          are working before customers see it.
+        </InfoNote>
+        <InfoNote>
+          <b className="font-semibold">Payments:</b> if deposits or online payments
+          are enabled, connect Stripe from the dashboard before promoting the link.
         </InfoNote>
       </div>
 
@@ -143,6 +188,16 @@ export function WidgetReveal({
           </span>
         </Link>
       </div>
+    </div>
+  );
+}
+
+function LaunchStat({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-[14px] border border-line bg-card px-4 py-3.5 shadow-[0_1px_3px_rgb(12_36_64/0.05)]">
+      <p className="text-[0.68rem] font-bold tracking-[0.14em] text-ink-faint uppercase">{label}</p>
+      <p className="mt-1 font-display text-[1.05rem] font-semibold text-ink">{value}</p>
+      <p className="mt-1 text-[0.76rem] leading-[1.55] text-ink-muted">{detail}</p>
     </div>
   );
 }

@@ -10,7 +10,6 @@ import {
   ActionButton,
   FilterTabs,
   GhostBtn,
-  PreviewNotice,
   TableWrap,
   Td,
   Th,
@@ -32,10 +31,8 @@ const LABEL: Record<Tab, string> = {
 
 export function InvoicesClient({
   data,
-  preview,
 }: {
   data: InvoicesData;
-  preview: boolean;
 }) {
   const [rows, setRows] = useState(data.invoices);
   const [tab, setTab] = useState<Tab>("all");
@@ -59,8 +56,6 @@ export function InvoicesClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
-
       <div className="mb-5 grid grid-cols-1 gap-4 min-[521px]:grid-cols-3">
         <StatCard label="Outstanding" value={money(data.outstandingCents)} caption="awaiting payment" />
         <StatCard label="Collected this month" value={money(data.paidThisMonthCents)} caption="paid invoices" />

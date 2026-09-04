@@ -43,7 +43,6 @@ const STEPS = [
 ] as const;
 
 export function OnboardingWizard({
-  mode,
   initialStep,
   initialData,
   tenantId,
@@ -51,9 +50,6 @@ export function OnboardingWizard({
   appUrl,
   ownerName,
 }: {
-  /** "mock" = placeholder env, in-memory only. "live" = real Supabase. */
-  mode: "live" | "mock";
-  /** 1–6, or 7 to open on the finished widget panel (mock previews). */
   initialStep: number;
   initialData: WizardData;
   tenantId: string;
@@ -79,7 +75,6 @@ export function OnboardingWizard({
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   };
 
-  /** Persist (live) then advance. Mock mode advances after a beat. */
   const runSave = async (
     persist: () => Promise<ActionResult>,
     apply: () => void,
@@ -88,14 +83,10 @@ export function OnboardingWizard({
     setSaving(true);
     setError(null);
     try {
-      if (mode === "live") {
-        const result = await persist();
-        if (!result.ok) {
-          setError(result.error);
-          return;
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 350));
+      const result = await persist();
+      if (!result.ok) {
+        setError(result.error);
+        return;
       }
       apply();
       advance(next);
@@ -111,10 +102,7 @@ export function OnboardingWizard({
     setError(null);
     setStep(to);
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
-    if (mode === "live") {
-      // Fire-and-forget: resume should reopen where they actually are.
-      void setOnboardingStep(to);
-    }
+    void setOnboardingStep(to);
   };
 
   const jumpTo = (n: number) => {
@@ -332,7 +320,6 @@ export function OnboardingWizard({
                 ) : step === 5 ? (
                   <BrandingStep
                     value={data.branding}
-                    mode={mode}
                     tenantId={tenantId}
                     busy={saving}
                     onSubmit={submitBranding}
@@ -349,13 +336,6 @@ export function OnboardingWizard({
               </motion.div>
             </AnimatePresence>
           </div>
-
-          {mode === "mock" && (
-            <p className="mt-4 text-center text-[0.72rem] text-ink-faint">
-              Preview mode — Supabase keys aren&rsquo;t configured, so nothing
-              is saved. Changes live in this tab only.
-            </p>
-          )}
         </div>
       </main>
     </div>

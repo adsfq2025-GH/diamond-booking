@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { supabaseEnvConfigured } from "@/lib/env";
 import {
   getBookingSettings,
   getBusinessProfile,
@@ -24,7 +23,6 @@ export default async function SettingsPage() {
       email={email}
       booking={booking}
       plan={context.plan}
-      preview={!supabaseEnvConfigured()}
       integrations={integrationStatus()}
     />
   );

@@ -14,7 +14,6 @@ import {
   ActionButton,
   FilterTabs,
   GhostBtn,
-  PreviewNotice,
   TableWrap,
   Td,
   Th,
@@ -37,11 +36,9 @@ const TAB_LABEL: Record<Tab, string> = {
 export function BookingsClient({
   data,
   timezone,
-  preview,
 }: {
   data: BookingsData;
   timezone: string;
-  preview: boolean;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState(data.bookings);
@@ -52,10 +49,6 @@ export function BookingsClient({
 
   async function extend(groupId: string) {
     setSeriesNotice("Extending…");
-    if (preview) {
-      setSeriesNotice("Preview mode — more occurrences would be reserved on your calendar.");
-      return;
-    }
     const res = await extendSeries(groupId);
     if (res.ok) {
       setSeriesNotice(`Reserved ${res.count ?? 0} more occurrences.`);
@@ -87,7 +80,7 @@ export function BookingsClient({
   function setStatus(id: string, status: BookingStatus) {
     setRows((prev) => prev.map((b) => (b.id === id ? { ...b, status } : b)));
     setSelected((s) => (s && s.id === id ? { ...s, status } : s));
-    if (!preview) void setBookingStatus(id, status);
+    void setBookingStatus(id, status);
   }
 
   function cancelWholeSeries(groupId: string) {
@@ -102,12 +95,11 @@ export function BookingsClient({
       ),
     );
     setSelected(null);
-    if (!preview) void cancelSeries(groupId);
+    void cancelSeries(groupId);
   }
 
   return (
     <div>
-      {preview && <PreviewNotice />}
       <Toolbar
         search={query}
         onSearch={setQuery}

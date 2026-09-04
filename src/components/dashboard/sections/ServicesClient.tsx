@@ -15,7 +15,7 @@ import { Icon } from "../icons";
 import { Panel, EmptyState } from "../ui";
 import { Modal } from "../Modal";
 import { inputBase, Label } from "@/components/ui/Field";
-import { ActionButton, GhostBtn, PreviewNotice, Toolbar } from "./shared";
+import { ActionButton, GhostBtn, Toolbar } from "./shared";
 
 const emptyDraft: ServiceDraft = {
   name: "",
@@ -49,10 +49,8 @@ function viewToDraft(s: ServiceView): ServiceDraft {
 
 export function ServicesClient({
   initial,
-  preview,
 }: {
   initial: ServiceView[];
-  preview: boolean;
 }) {
   const router = useRouter();
   const [services, setServices] = useState(initial);
@@ -107,20 +105,18 @@ export function ServicesClient({
   async function toggle(id: string) {
     const next = !services.find((s) => s.id === id)?.active;
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, active: next } : s)));
-    if (!preview) await setServiceActive(id, next);
+    await setServiceActive(id, next);
   }
 
   async function remove(id: string) {
     const prev = services;
     setServices((p) => p.filter((s) => s.id !== id));
-    if (!preview) {
-      const res = await deleteService(id);
-      if (!res.ok) {
-        setServices(prev); // revert
-        alert(res.error);
-      } else {
-        router.refresh();
-      }
+    const res = await deleteService(id);
+    if (!res.ok) {
+      setServices(prev);
+      alert(res.error);
+    } else {
+      router.refresh();
     }
   }
 
@@ -128,8 +124,6 @@ export function ServicesClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
-
       <Toolbar
         search={query}
         onSearch={setQuery}
@@ -175,12 +169,11 @@ export function ServicesClient({
       {editing && (
         <ServiceModal
           draft={editing}
-          preview={preview}
           onClose={() => setEditing(null)}
           onSaved={(draft, id) => {
             optimisticApply(draft, id);
             setEditing(null);
-            if (!preview) router.refresh();
+            router.refresh();
           }}
           onDelete={
             editing.id
@@ -271,13 +264,11 @@ function ServiceCard({
 
 function ServiceModal({
   draft,
-  preview,
   onClose,
   onSaved,
   onDelete,
 }: {
   draft: ServiceDraft;
-  preview: boolean;
   onClose: () => void;
   onSaved: (draft: ServiceDraft, id: string) => void;
   onDelete?: () => void;
@@ -299,10 +290,6 @@ function ServiceModal({
   async function submit() {
     setBusy(true);
     setError(null);
-    if (preview) {
-      onSaved(d, d.id ?? `local-${Date.now()}`);
-      return;
-    }
     const res = await saveService(d);
     if (res.ok) onSaved(d, res.id);
     else {
@@ -315,7 +302,6 @@ function ServiceModal({
     <Modal
       onClose={onClose}
       title={draft.id ? "Edit service" : "New service"}
-      description={preview ? "Preview mode — changes won't be saved." : undefined}
       size="lg"
       footer={
         <div className="flex w-full items-center justify-between gap-2">

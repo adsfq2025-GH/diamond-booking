@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { supabaseEnvConfigured } from "@/lib/env";
 import { getDashboardContext, getInvoicesData } from "@/lib/dashboard/data";
 import { hasFeature } from "@/lib/plans";
 import { InvoicesClient } from "@/components/dashboard/sections/InvoicesClient";
@@ -18,5 +17,5 @@ export default async function InvoicesPage() {
       />
     );
   }
-  return <InvoicesClient data={data} preview={!supabaseEnvConfigured()} />;
+  return <InvoicesClient data={data} />;
 }

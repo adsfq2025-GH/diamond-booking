@@ -18,7 +18,7 @@ import { Panel, PanelHeader } from "../ui";
 import { Toggle } from "@/app/onboarding/wizard-ui";
 import { inputBase, Label, SelectShell } from "@/components/ui/Field";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
-import { ActionButton, GhostBtn, PreviewNotice } from "./shared";
+import { ActionButton, GhostBtn } from "./shared";
 
 type TabKey = "profile" | "bookings" | "notifications" | "integrations" | "security" | "team" | "billing";
 
@@ -44,14 +44,12 @@ export function SettingsClient({
   email,
   booking,
   plan,
-  preview,
   integrations,
 }: {
   profile: BusinessProfile;
   email: EmailSettingsView;
   booking: BookingSettingsView;
   plan: PlanTier;
-  preview: boolean;
   integrations: IntegrationFlags;
 }) {
   const [tab, setTab] = useState<TabKey>("profile");
@@ -73,7 +71,6 @@ export function SettingsClient({
 
   return (
     <div>
-      {preview && <PreviewNotice />}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
         {/* Tab rail */}
         <nav className="flex gap-1.5 overflow-x-auto lg:flex-col lg:overflow-visible">
@@ -99,10 +96,10 @@ export function SettingsClient({
         </nav>
 
         <div>
-          {tab === "profile" && <ProfileTab profile={profile} preview={preview} />}
-          {tab === "bookings" && <BookingsTab booking={booking} preview={preview} />}
+          {tab === "profile" && <ProfileTab profile={profile} />}
+          {tab === "bookings" && <BookingsTab booking={booking} />}
           {tab === "notifications" && <NotificationsTab plan={plan} />}
-          {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} preview={preview} />}
+          {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} />}
           {tab === "security" && <SecurityTab />}
           {tab === "team" && <TeamPermissionsTab />}
           {tab === "billing" && <BillingTab plan={plan} />}
@@ -121,7 +118,7 @@ function SaveBar() {
   );
 }
 
-function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: boolean }) {
+function ProfileTab({ profile }: { profile: BusinessProfile }) {
   const [form, setForm] = useState<BusinessProfile>(profile);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -187,7 +184,7 @@ function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: b
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
           <GhostBtn onClick={() => setForm(profile)}>Reset</GhostBtn>
           <ActionButton icon="check" onClick={save}>
-            {busy ? "Saving…" : preview ? "Save (preview)" : "Save changes"}
+            {busy ? "Saving…" : "Save changes"}
           </ActionButton>
         </div>
       </div>
@@ -195,7 +192,7 @@ function ProfileTab({ profile, preview }: { profile: BusinessProfile; preview: b
   );
 }
 
-function BookingsTab({ booking, preview }: { booking: BookingSettingsView; preview: boolean }) {
+function BookingsTab({ booking }: { booking: BookingSettingsView }) {
   const [recurring, setRecurring] = useState(booking.recurringEnabled);
   const [autoConfirm, setAutoConfirm] = useState(booking.autoConfirm);
   const [busy, setBusy] = useState(false);
@@ -243,7 +240,7 @@ function BookingsTab({ booking, preview }: { booking: BookingSettingsView; previ
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-line pt-5">
           <ActionButton icon="check" onClick={save}>
-            {busy ? "Saving…" : preview ? "Save (preview)" : "Save changes"}
+            {busy ? "Saving…" : "Save changes"}
           </ActionButton>
         </div>
       </div>
@@ -278,11 +275,9 @@ function NotificationsTab({ plan }: { plan: PlanTier }) {
 function IntegrationsTab({
   flags,
   email,
-  preview,
 }: {
   flags: IntegrationFlags;
   email: EmailSettingsView;
-  preview: boolean;
 }) {
   const items = [
     { name: "Stripe", desc: "Accept deposits and card payments.", icon: "payments" as IconName, connected: flags.stripe, comingSoon: false },
@@ -291,7 +286,7 @@ function IntegrationsTab({
   ];
   return (
     <div className="space-y-5">
-      <EmailPanel email={email} preview={preview} />
+      <EmailPanel email={email} />
       <Panel>
       <PanelHeader title="Integrations" caption="Connect the tools that power payments and messaging" />
       <ul className="divide-y divide-line">
@@ -326,7 +321,7 @@ function IntegrationsTab({
   );
 }
 
-function EmailPanel({ email, preview }: { email: EmailSettingsView; preview: boolean }) {
+function EmailPanel({ email }: { email: EmailSettingsView }) {
   const [provider, setProvider] = useState<EmailSettingsView["provider"]>(email.provider);
   const [form, setForm] = useState({
     host: email.host,
@@ -471,7 +466,7 @@ function EmailPanel({ email, preview }: { email: EmailSettingsView; preview: boo
             <GhostBtn onClick={test}>{busy === "test" ? "Sending…" : "Send test email"}</GhostBtn>
           )}
           <ActionButton icon="check" onClick={save}>
-            {busy === "save" ? "Saving…" : preview ? "Save (preview)" : "Save email settings"}
+            {busy === "save" ? "Saving…" : "Save email settings"}
           </ActionButton>
         </div>
       </div>
