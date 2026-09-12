@@ -5,6 +5,7 @@ import {
   DEFAULT_ACCENT_COLOR,
   DEFAULT_PRIMARY_COLOR,
   defaultHours,
+  type LaunchReadiness,
   type TenantBranding,
   type TenantSettings,
   type WizardData,
@@ -142,6 +143,24 @@ export default async function OnboardingPage({
     },
   };
 
+  const launchReadiness: LaunchReadiness = {
+    onboardingProgress: settings.onboarding_complete ? 1 : Math.min(Math.max(Number(settings.onboarding_step ?? 1) / 6, 0), 1),
+    onboardingComplete: Boolean(settings.onboarding_complete),
+    widgetPublished: Boolean(widget?.public_key),
+    firstBookingAt: null,
+    paymentStatus: settings.payments_enabled ? "action_needed" : "ok",
+    blockers: [
+      !settings.onboarding_complete ? "Finish onboarding" : null,
+      !widget?.public_key ? "Generate your booking link" : null,
+      settings.payments_enabled ? "Connect Stripe before accepting live online payments" : null,
+    ].filter((value): value is string => Boolean(value)),
+    status: !settings.onboarding_complete
+      ? "not_ready"
+      : settings.payments_enabled
+        ? "needs_attention"
+        : "ready",
+  };
+
   const parsed = Number.parseInt(step ?? "", 10);
   const persistedStep = settings.onboarding_complete
     ? 7
@@ -158,6 +177,7 @@ export default async function OnboardingPage({
       publicKey={widget?.public_key ?? ""}
       appUrl={appUrl}
       ownerName={profile.full_name}
+      launchReadiness={launchReadiness}
     />
   );
 }

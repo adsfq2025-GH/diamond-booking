@@ -150,6 +150,42 @@ export async function saveBookingSettings(input: {
   return { ok: true };
 }
 
+export async function saveWidgetSettings(input: {
+  primaryColor: string;
+  radius: string;
+  layout: string;
+  allowedDomains: string[];
+  customFields: Array<{ key: string; label: string; type: string; required: boolean }>;
+  active: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!supabaseEnvConfigured()) {
+    return { ok: false, error: "Connect Supabase to save widget settings." };
+  }
+  const profile = await requireRole("business_owner");
+  if (!profile.tenant_id) return { ok: false, error: "No business found." };
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("widget_configs")
+    .update({
+      theme: {
+        primary_color: input.primaryColor,
+        radius: input.radius,
+        layout: input.layout,
+      } as Json,
+      allowed_domains: input.allowedDomains,
+      custom_fields: input.customFields as unknown as Json,
+      active: input.active,
+    })
+    .eq("tenant_id", profile.tenant_id);
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/dashboard/widget");
+  revalidatePath("/book/[public_key]", "page");
+  return { ok: true };
+}
+
 /** Send a test email to the owner to confirm delivery works. */
 export async function testEmailSettings(
   to: string,

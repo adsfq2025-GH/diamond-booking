@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import type { WidgetData } from "@/lib/dashboard/types";
+import { saveWidgetSettings } from "@/lib/actions/settings";
 import { Icon } from "../icons";
 import { Panel, PanelHeader } from "../ui";
 import { inputBase, Label } from "@/components/ui/Field";
 import { GhostBtn } from "./shared";
 
 const SWATCHES = ["#2e86c1", "#0c2440", "#3fb68b", "#8e6bbf", "#e07a5f", "#f4b942"];
+const FIELD_TYPES = ["text", "phone", "textarea", "checkbox"] as const;
 
 export function WidgetClient({
   data,
@@ -18,6 +20,11 @@ export function WidgetClient({
   const [color, setColor] = useState(data.primaryColor);
   const [radius, setRadius] = useState(parseInt(data.radius) || 12);
   const [copied, setCopied] = useState<"embed" | "link" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [customFields, setCustomFields] = useState(data.customFields);
+  const [allowedDomains, setAllowedDomains] = useState(data.allowedDomains);
+  const [domainDraft, setDomainDraft] = useState("");
 
   const bookUrl = `${data.appUrl}/book/${data.publicKey}`;
   const embed = `<script src="${data.appUrl}/embed.js" data-key="${data.publicKey}" async></script>`;
@@ -27,6 +34,53 @@ export function WidgetClient({
       setCopied(which);
       setTimeout(() => setCopied(null), 1600);
     });
+  }
+
+  async function persist() {
+    setSaving(true);
+    setMessage(null);
+    const res = await saveWidgetSettings({
+      primaryColor: color,
+      radius: `${radius}px`,
+      layout: data.layout,
+      allowedDomains: data.allowedDomains,
+      customFields,
+      allowedDomains,
+      active: data.active,
+    });
+    setMessage(res.ok ? "Widget settings saved." : res.error);
+    setSaving(false);
+  }
+
+  function updateField(index: number, patch: Partial<(typeof customFields)[number]>) {
+    setCustomFields((prev) => prev.map((field, fieldIndex) => (fieldIndex === index ? { ...field, ...patch } : field)));
+  }
+
+  function addField() {
+    setCustomFields((prev) => [
+      ...prev,
+      {
+        key: `field_${prev.length + 1}`,
+        label: "New question",
+        type: "text",
+        required: false,
+      },
+    ]);
+  }
+
+  function removeField(index: number) {
+    setCustomFields((prev) => prev.filter((_, fieldIndex) => fieldIndex !== index));
+  }
+
+  function addDomain() {
+    const domain = domainDraft.trim().toLowerCase();
+    if (!domain || allowedDomains.includes(domain)) return;
+    setAllowedDomains((prev) => [...prev, domain]);
+    setDomainDraft("");
+  }
+
+  function removeDomain(domain: string) {
+    setAllowedDomains((prev) => prev.filter((item) => item !== domain));
   }
 
   return (
@@ -112,33 +166,81 @@ export function WidgetClient({
                   className="w-full accent-blue-600"
                 />
               </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[0.76rem] text-ink-faint">These changes update the live hosted booking page and embeddable widget.</p>
+                <GhostBtn onClick={persist} icon={saving ? "clock" : "check"}>
+                  {saving ? "Saving" : "Save appearance"}
+                </GhostBtn>
+              </div>
+              {message ? <p className="text-[0.76rem] font-medium text-success-700">{message}</p> : null}
             </div>
           </Panel>
 
           <Panel>
             <PanelHeader title="Custom fields" caption="Extra questions on the booking form" />
             <div className="px-5 py-5">
-              {data.customFields.length === 0 ? (
+              {customFields.length === 0 ? (
                 <p className="text-[0.83rem] text-ink-faint">No custom fields yet.</p>
               ) : (
                 <ul className="space-y-2">
-                  {data.customFields.map((f) => (
+                  {customFields.map((f, index) => (
                     <li
                       key={f.key}
-                      className="flex items-center justify-between rounded-[10px] border border-line px-3.5 py-2.5"
+                      className="space-y-3 rounded-[10px] border border-line px-3.5 py-3"
                     >
-                      <div>
-                        <p className="text-[0.85rem] font-medium text-ink">{f.label}</p>
-                        <p className="text-[0.72rem] text-ink-faint capitalize">
-                          {f.type} · {f.required ? "required" : "optional"}
-                        </p>
+                      <div className="grid gap-3 md:grid-cols-[1fr_160px_auto] md:items-end">
+                        <div>
+                          <Label htmlFor={`field-label-${index}`}>Label</Label>
+                          <input
+                            id={`field-label-${index}`}
+                            className={inputBase}
+                            value={f.label}
+                            onChange={(event) => updateField(index, { label: event.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor={`field-type-${index}`}>Type</Label>
+                          <select
+                            id={`field-type-${index}`}
+                            className={cn(inputBase, "cursor-pointer")}
+                            value={f.type}
+                            onChange={(event) => updateField(index, { type: event.target.value })}
+                          >
+                            {FIELD_TYPES.map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <GhostBtn onClick={() => removeField(index)} icon="close">
+                          Remove
+                        </GhostBtn>
                       </div>
-                      <Icon name="dots" className="h-4 w-4 text-ink-faint" />
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <Label htmlFor={`field-key-${index}`}>Field key</Label>
+                          <input
+                            id={`field-key-${index}`}
+                            className={cn(inputBase, "font-mono text-[0.78rem]")}
+                            value={f.key}
+                            onChange={(event) => updateField(index, { key: event.target.value.replace(/\s+/g, "_").toLowerCase() })}
+                          />
+                        </div>
+                        <label className="mt-5 flex items-center gap-2 text-[0.78rem] font-medium text-ink-muted">
+                          <input
+                            type="checkbox"
+                            checked={f.required}
+                            onChange={(event) => updateField(index, { required: event.target.checked })}
+                          />
+                          Required
+                        </label>
+                      </div>
                     </li>
                   ))}
                 </ul>
               )}
-              <GhostBtn icon="plus" className="mt-3">
+              <GhostBtn icon="plus" className="mt-3" onClick={addField}>
                 Add field
               </GhostBtn>
             </div>
@@ -148,19 +250,32 @@ export function WidgetClient({
             <PanelHeader title="Allowed domains" caption="Where the widget may be embedded" />
             <div className="px-5 py-5">
               <div className="flex flex-wrap gap-2">
-                {data.allowedDomains.length === 0 ? (
+                {allowedDomains.length === 0 ? (
                   <p className="text-[0.83rem] text-ink-faint">Any domain (no restriction).</p>
                 ) : (
-                  data.allowedDomains.map((d) => (
+                  allowedDomains.map((d) => (
                     <span
                       key={d}
                       className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] border border-line-strong bg-surface-alt px-3 py-1.5 text-[0.8rem] text-ink"
                     >
                       {d}
-                      <Icon name="close" className="h-3.5 w-3.5 cursor-pointer text-ink-faint hover:text-ink" />
+                      <button type="button" onClick={() => removeDomain(d)}>
+                        <Icon name="close" className="h-3.5 w-3.5 cursor-pointer text-ink-faint hover:text-ink" />
+                      </button>
                     </span>
                   ))
                 )}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  className={cn(inputBase, "flex-1")}
+                  value={domainDraft}
+                  onChange={(event) => setDomainDraft(event.target.value)}
+                  placeholder="example.com"
+                />
+                <GhostBtn onClick={addDomain} icon="plus">
+                  Add
+                </GhostBtn>
               </div>
             </div>
           </Panel>

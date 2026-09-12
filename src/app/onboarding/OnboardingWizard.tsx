@@ -11,6 +11,7 @@ import type {
   BusinessInfoInput,
   FinishInput,
   HoursInput,
+  LaunchReadiness,
   ServiceInput,
   TeamInput,
   WizardData,
@@ -49,6 +50,7 @@ export function OnboardingWizard({
   publicKey,
   appUrl,
   ownerName,
+  launchReadiness,
 }: {
   initialStep: number;
   initialData: WizardData;
@@ -56,6 +58,7 @@ export function OnboardingWizard({
   publicKey: string;
   appUrl: string;
   ownerName: string;
+  launchReadiness: LaunchReadiness;
 }) {
   const [data, setData] = useState<WizardData>(initialData);
   const [done, setDone] = useState(initialStep > 6);
@@ -287,6 +290,7 @@ export function OnboardingWizard({
                     publicKey={publicKey}
                     appUrl={appUrl}
                     businessName={data.business.name}
+                    readiness={launchReadiness}
                   />
                 ) : step === 1 ? (
                   <BusinessStep
@@ -329,6 +333,7 @@ export function OnboardingWizard({
                   <FinishStep
                     value={data.finish}
                     busy={saving}
+                    readiness={launchReadiness}
                     onSubmit={submitFinish}
                     onBack={() => goBack(5)}
                   />

@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { money, moneyCompact, percent, relativeDay } from "@/lib/format";
 import type { AdminData, AdminTenant } from "@/lib/portal/admin-data";
+import { resetAdminTenantOnboarding, restoreAdminTenant, suspendAdminTenant } from "@/lib/actions/admin";
 import { BarChart, RevenueBarChart, SegmentBar } from "@/components/dashboard/charts";
 import { Icon } from "@/components/dashboard/icons";
 import { Meter, Panel, PanelHeader, StatCard } from "@/components/dashboard/ui";
@@ -53,7 +54,7 @@ const SUPPORT_TONE: Record<AdminTenant["supportPriority"], string> = {
   urgent: "bg-[#fbeaea] text-[#a63d39]",
 };
 type TenantFilter = "all" | "at_risk" | "past_due" | "trialing";
-type ActionDraft = { tenantId: string; kind: "suspend" | "restore" } | null;
+type ActionDraft = { tenantId: string; kind: "suspend" | "restore" | "reset_onboarding" } | null;
 type AuditFilter = "all" | "impersonation" | "billing" | "security";
 
 function pillClassName(tone: string) {
@@ -88,6 +89,10 @@ export function AdminClient({
   const [actionDraft, setActionDraft] = useState<ActionDraft>(null);
   const [actionReason, setActionReason] = useState("");
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [, suspendAction, suspendPending] = useActionState(suspendAdminTenant, null);
+  const [, restoreAction, restorePending] = useActionState(restoreAdminTenant, null);
+  const [, resetOnboardingAction, resetOnboardingPending] = useActionState(resetAdminTenantOnboarding, null);
 
   const filteredTenants = useMemo(
     () =>
@@ -105,6 +110,7 @@ export function AdminClient({
 
   const selectedTenant = selectedTenantId ? tenants.find((tenant) => tenant.id === selectedTenantId) ?? null : null;
   const draftTenant = actionDraft ? tenants.find((tenant) => tenant.id === actionDraft.tenantId) ?? null : null;
+  const actionPending = actionDraft?.kind === "suspend" ? suspendPending : actionDraft?.kind === "restore" ? restorePending : resetOnboardingPending;
   const filteredAudit = useMemo(
     () =>
       data.audit.filter((item) => {
@@ -253,6 +259,7 @@ export function AdminClient({
       {tab === "tenants" && (
         <Panel>
           <PanelHeader title="Tenants" caption={`${filteredTenants.length} businesses in view`} action={<ActionButton>Export tenants</ActionButton>} />
+          {actionMessage ? <p className="px-5 pt-4 text-[0.78rem] font-medium text-success-700">{actionMessage}</p> : null}
           <div className="px-5 pt-5">
             <Toolbar
               search={search}
@@ -337,6 +344,13 @@ export function AdminClient({
                         className="rounded-[8px] border border-line-strong px-2.5 py-1.5 text-[0.72rem] font-semibold text-ink-muted transition-colors hover:border-blue-600 hover:text-blue-600"
                       >
                         View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActionDraft({ tenantId: t.id, kind: "reset_onboarding" })}
+                        className="rounded-[8px] border border-line-strong px-2.5 py-1.5 text-[0.72rem] font-semibold text-ink-muted transition-colors hover:border-gold-500 hover:text-gold-700"
+                      >
+                        Reset onboarding
                       </button>
                       <button
                         type="button"
@@ -689,15 +703,26 @@ export function AdminClient({
                 </div>
                 <div className="rounded-[12px] bg-surface-alt px-3.5 py-3 text-[0.78rem] text-ink-muted">
                   <p>
-                    Widget status: <span className="font-semibold text-ink">{selectedTenant.widgetPublished ? "Published" : "Not published"}</span>
+                    Widget status: <span className="font-semibold text-ink">{selectedTenant.launchReadiness.widgetPublished ? "Published" : "Not published"}</span>
                   </p>
                   <p className="mt-1">
-                    First booking: <span className="font-semibold text-ink">{selectedTenant.firstBookingAt ? relativeDay(selectedTenant.firstBookingAt) : "No bookings yet"}</span>
+                    First booking: <span className="font-semibold text-ink">{selectedTenant.launchReadiness.firstBookingAt ? relativeDay(selectedTenant.launchReadiness.firstBookingAt) : "No bookings yet"}</span>
                   </p>
                   <p className="mt-1">
-                    Next follow-up: <span className="font-semibold text-ink">{selectedTenant.nextFollowUpAt ? relativeDay(selectedTenant.nextFollowUpAt) : "Not scheduled"}</span>
+                    Next follow-up: <span className="font-semibold text-ink">{selectedTenant.launchReadiness.nextFollowUpAt ? relativeDay(selectedTenant.launchReadiness.nextFollowUpAt) : "Not scheduled"}</span>
                   </p>
                 </div>
+                {selectedTenant.launchReadiness.blockers.length > 0 ? (
+                  <ul className="space-y-2 text-[0.76rem] text-ink-muted">
+                    {selectedTenant.launchReadiness.blockers.map((blocker) => (
+                      <li key={blocker} className="rounded-[10px] border border-line bg-card px-3 py-2.5">{blocker}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="rounded-[10px] border border-success-200 bg-success-50 px-3 py-2.5 text-[0.76rem] font-medium text-success-700">
+                    This tenant is launch-ready based on current live signals.
+                  </div>
+                )}
               </div>
             </Panel>
 
@@ -755,38 +780,67 @@ export function AdminClient({
           open
           onClose={() => setActionDraft(null)}
           size="sm"
-          title={actionDraft.kind === "suspend" ? "Suspend tenant" : "Restore tenant"}
+          title={actionDraft.kind === "suspend" ? "Suspend tenant" : actionDraft.kind === "restore" ? "Restore tenant" : "Reset onboarding"}
           description={`Confirm the admin action for ${draftTenant.name}.`}
           footer={
             <>
               <GhostBtn onClick={() => setActionDraft(null)}>Cancel</GhostBtn>
               <ActionButton
                 icon={actionDraft.kind === "suspend" ? "warning" : "checkCircle"}
-                onClick={() => {
-                  if (!actionReason.trim()) return;
-                  setTenants((prev) =>
-                    prev.map((tenant) =>
-                      tenant.id === draftTenant.id
-                        ? {
-                            ...tenant,
-                            suspended: actionDraft.kind === "suspend",
-                            status: actionDraft.kind === "suspend" ? "suspended" : "active",
-                            lifecycle: actionDraft.kind === "suspend" ? "suspended" : "live",
-                            mrrCents: actionDraft.kind === "suspend" ? 0 : tenant.plan === "starter" ? 2900 : tenant.plan === "professional" ? 5900 : 11900,
-                          }
-                        : tenant,
-                    ),
-                  );
-                  setActionReason("");
-                  setActionDraft(null);
-                }}
+                type="submit"
+                form="tenant-action-form"
+                disabled={!actionReason.trim() || actionPending}
               >
-                {actionDraft.kind === "suspend" ? "Confirm suspend" : "Confirm restore"}
+                {actionPending ? "Saving..." : actionDraft.kind === "suspend" ? "Confirm suspend" : actionDraft.kind === "restore" ? "Confirm restore" : "Confirm reset"}
               </ActionButton>
             </>
           }
         >
-          <div className="space-y-3 text-[0.82rem] leading-[1.6] text-ink-muted">
+          <form
+            id="tenant-action-form"
+            action={async (formData) => {
+              if (!draftTenant) return;
+              setActionMessage(null);
+              formData.set("tenantId", draftTenant.id);
+              formData.set("reason", actionReason);
+              const result = actionDraft.kind === "suspend"
+                ? await suspendAction(formData)
+                : actionDraft.kind === "restore"
+                  ? await restoreAction(formData)
+                  : await resetOnboardingAction(formData);
+              if (result?.error) {
+                setActionMessage(result.error);
+                return;
+              }
+              setTenants((prev) =>
+                prev.map((tenant) =>
+                  tenant.id === draftTenant.id
+                    ? {
+                        ...tenant,
+                        suspended: result?.suspended ?? tenant.suspended,
+                        onboardingProgress: actionDraft.kind === "reset_onboarding" ? 0 : tenant.onboardingProgress,
+                        launchReadiness:
+                          actionDraft.kind === "reset_onboarding"
+                            ? {
+                                ...tenant.launchReadiness,
+                                onboardingProgress: 0,
+                                onboardingComplete: false,
+                                blockers: ["Finish onboarding", ...tenant.launchReadiness.blockers.filter((item) => item !== "Finish onboarding")],
+                                status: "not_ready",
+                              }
+                            : tenant.launchReadiness,
+                        status: result?.suspended ? "suspended" : tenant.status === "suspended" ? "active" : tenant.status,
+                        lifecycle: result?.suspended ? "suspended" : tenant.lifecycle === "suspended" ? "live" : tenant.lifecycle,
+                      }
+                    : tenant,
+                ),
+              );
+              setActionMessage(actionDraft.kind === "suspend" ? "Tenant suspended." : actionDraft.kind === "restore" ? "Tenant restored." : "Onboarding reset.");
+              setActionReason("");
+              setActionDraft(null);
+            }}
+            className="space-y-3 text-[0.82rem] leading-[1.6] text-ink-muted"
+          >
             <p>
               Review the tenant’s billing state, onboarding status, and support history before taking this action.
             </p>
@@ -801,14 +855,15 @@ export function AdminClient({
             <label className="block">
               <span className="mb-1.5 block text-[0.76rem] font-semibold text-ink">Reason required</span>
               <textarea
+                name="reason"
                 value={actionReason}
                 onChange={(event) => setActionReason(event.target.value)}
                 rows={3}
-                placeholder={actionDraft.kind === "suspend" ? "Document why this tenant is being suspended." : "Document why this tenant is being restored."}
+                placeholder={actionDraft.kind === "suspend" ? "Document why this tenant is being suspended." : actionDraft.kind === "restore" ? "Document why this tenant is being restored." : "Document why this tenant should restart onboarding."}
                 className="w-full rounded-[12px] border border-line-strong bg-card px-3.5 py-2.5 text-[0.82rem] text-ink placeholder:text-ink-faint/80 focus:border-blue-600 focus:ring-[3px] focus:ring-blue-600/15 focus:outline-none"
               />
             </label>
-          </div>
+          </form>
         </Modal>
       )}
     </div>

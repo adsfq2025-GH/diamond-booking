@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Em } from "@/components/ui/SectionHeading";
 import { InfoNote } from "../wizard-ui";
 import { cn } from "@/lib/cn";
+import type { LaunchReadiness } from "@/lib/onboarding/types";
 
 /**
  * The onboarding payoff: embed snippet + copy button + live preview frame,
@@ -14,10 +15,12 @@ export function WidgetReveal({
   publicKey,
   appUrl,
   businessName,
+  readiness,
 }: {
   publicKey: string;
   appUrl: string;
   businessName: string;
+  readiness: LaunchReadiness;
 }) {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -72,7 +75,7 @@ export function WidgetReveal({
       <div className="mb-5 grid gap-3 min-[641px]:grid-cols-3">
         <LaunchStat label="Booking link" value="Ready" detail="Hosted page is available now" />
         <LaunchStat label="Embed code" value="Ready" detail="Copy once and paste into your site" />
-        <LaunchStat label="Next step" value="Test book" detail="Run one real booking before launch" />
+        <LaunchStat label="Next step" value={readiness.blockers.length === 0 ? "Promote it" : "Review blockers"} detail={readiness.blockers.length === 0 ? "Your setup is ready for customers" : "Run one real booking before launch"} />
       </div>
 
       {/* Embed snippet */}
@@ -156,6 +159,9 @@ export function WidgetReveal({
       </div>
 
       <div className="mb-7 space-y-3">
+        <InfoNote>
+          <b className="font-semibold">Launch readiness:</b> {readiness.blockers.length === 0 ? "No blockers detected from your current setup." : readiness.blockers.join(" · ")}
+        </InfoNote>
         <InfoNote>
           <b className="font-semibold">Launch tip:</b> open the hosted booking
           page, make one test booking, and then embed the snippet on your site.

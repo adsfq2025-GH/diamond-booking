@@ -10,7 +10,7 @@ import {
   InfoNote,
   WizardError,
 } from "../wizard-ui";
-import type { FinishInput } from "@/lib/onboarding/types";
+import type { FinishInput, LaunchReadiness } from "@/lib/onboarding/types";
 import { cn } from "@/lib/cn";
 
 const WINDOW_OPTIONS = [12, 24, 48, 72];
@@ -18,11 +18,13 @@ const WINDOW_OPTIONS = [12, 24, 48, 72];
 export function FinishStep({
   value,
   busy,
+  readiness,
   onSubmit,
   onBack,
 }: {
   value: FinishInput;
   busy: boolean;
+  readiness: LaunchReadiness;
   onSubmit: (next: FinishInput) => void;
   onBack: () => void;
 }) {
@@ -204,6 +206,20 @@ export function FinishStep({
           <li>• Confirm your business hours match when customers can really book.</li>
           <li>• Add your logo and brand color so the booking page feels trustworthy.</li>
           <li>• If payments stay on, connect Stripe in the dashboard before going fully live.</li>
+        </ul>
+      </div>
+
+      <div className="mt-5 rounded-[14px] border border-line bg-card p-4 min-[521px]:p-5">
+        <p className="text-[0.82rem] font-semibold text-ink">Launch readiness</p>
+        <p className="mt-1 text-[0.78rem] text-ink-muted">
+          Current status: <span className="font-semibold text-ink">{readiness.status.replace("_", " ")}</span>
+        </p>
+        <ul className="mt-3 space-y-2 text-[0.8rem] leading-[1.6] text-ink-muted">
+          {readiness.blockers.length === 0 ? (
+            <li>• No blockers detected from current setup.</li>
+          ) : (
+            readiness.blockers.map((blocker) => <li key={blocker}>• {blocker}</li>)
+          )}
         </ul>
       </div>
 

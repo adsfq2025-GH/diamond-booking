@@ -106,6 +106,17 @@ export interface FinishInput {
   recurring_enabled: boolean;
 }
 
+export interface LaunchReadiness {
+  onboardingProgress: number;
+  onboardingComplete: boolean;
+  widgetPublished: boolean;
+  firstBookingAt: string | null;
+  paymentStatus: "ok" | "action_needed" | "past_due";
+  nextFollowUpAt?: string | null;
+  blockers: string[];
+  status: "not_ready" | "needs_attention" | "ready";
+}
+
 /** Everything the wizard edits, hydrated server-side (or mocked). */
 export interface WizardData {
   business: BusinessInfoInput;

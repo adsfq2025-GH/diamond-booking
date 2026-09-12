@@ -1,5 +1,6 @@
 import type { Json } from "@/types/database";
 import { createAdminClient } from "@/lib/supabase/server";
+import type { LaunchReadiness } from "@/lib/onboarding/types";
 
 export interface AdminTenant {
   id: string;
@@ -27,6 +28,7 @@ export interface AdminTenant {
   notes: string[];
   activityTimeline: Array<{ id: string; label: string; detail: string; at: string }>;
   nextFollowUpAt: string | null;
+  launchReadiness: LaunchReadiness;
 }
 
 export interface AdminData {
@@ -98,6 +100,31 @@ function computeLifecycle(status: AdminTenant["status"], onboardingProgress: num
   if (status === "trialing") return onboardingProgress >= 0.8 ? "activating" : "trialing";
   if (healthTier === "at_risk" || healthTier === "critical") return "at_risk";
   return "live";
+}
+
+function buildLaunchReadiness(input: {
+  onboardingProgress: number;
+  onboardingComplete: boolean;
+  widgetPublished: boolean;
+  firstBookingAt: string | null;
+  paymentStatus: AdminTenant["paymentStatus"];
+  nextFollowUpAt: string | null;
+}): LaunchReadiness {
+  const blockers: string[] = [];
+  if (!input.onboardingComplete) blockers.push("Finish onboarding");
+  if (!input.widgetPublished) blockers.push("Publish the booking widget");
+  if (input.paymentStatus !== "ok") blockers.push("Review billing and payment setup");
+  if (!input.firstBookingAt) blockers.push("Complete a first booking test");
+  return {
+    onboardingProgress: input.onboardingProgress,
+    onboardingComplete: input.onboardingComplete,
+    widgetPublished: input.widgetPublished,
+    firstBookingAt: input.firstBookingAt,
+    paymentStatus: input.paymentStatus,
+    nextFollowUpAt: input.nextFollowUpAt,
+    blockers,
+    status: blockers.length === 0 ? "ready" : input.onboardingComplete ? "needs_attention" : "not_ready",
+  };
 }
 
 export async function getAdminData(): Promise<AdminData> {
@@ -205,6 +232,7 @@ export async function getAdminData(): Promise<AdminData> {
       .slice(0, 6);
     const nextFollowUpAt = (auditByTenant.get(tenant.id) ?? [])
       .find((row) => row.action === "admin_follow_up_scheduled");
+    const widgetPublished = Boolean(widgetByTenant.get(tenant.id)?.active);
     const activityTimeline = (auditByTenant.get(tenant.id) ?? [])
       .slice(0, 8)
       .map((row) => ({
@@ -213,6 +241,15 @@ export async function getAdminData(): Promise<AdminData> {
         detail: describeAuditDetail(row.action, asObject(row.meta)),
         at: row.created_at,
       }));
+
+    const launchReadiness = buildLaunchReadiness({
+      onboardingProgress,
+      onboardingComplete,
+      widgetPublished,
+      firstBookingAt,
+      paymentStatus,
+      nextFollowUpAt: nextFollowUpAt ? String(asObject(nextFollowUpAt.meta).follow_up_at ?? "") : null,
+    });
 
     return {
       id: tenant.id,
@@ -232,14 +269,15 @@ export async function getAdminData(): Promise<AdminData> {
       onboardingProgress,
       supportPriority: health.tier === "critical" || paymentStatus === "past_due" ? "urgent" : health.tier === "at_risk" || paymentStatus === "action_needed" ? "elevated" : "normal",
       paymentStatus,
-      widgetPublished: Boolean(widgetByTenant.get(tenant.id)?.active),
+      widgetPublished,
       firstBookingAt,
       suspended: tenant.suspended,
       businessCategory: tenant.industry ?? "General services",
       timezone: tenant.timezone,
       notes,
       activityTimeline,
-      nextFollowUpAt: nextFollowUpAt ? String(asObject(nextFollowUpAt.meta).follow_up_at ?? "") : null,
+      nextFollowUpAt: launchReadiness.nextFollowUpAt ?? null,
+      launchReadiness,
     };
   });
 
