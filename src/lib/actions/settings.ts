@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
 import { sendTestEmail } from "@/lib/integrations/email";
+import { smsConfigured } from "@/lib/integrations/sms";
 import type { Json } from "@/types/database";
 import type { BusinessProfile } from "@/lib/dashboard/data";
 
@@ -196,4 +197,66 @@ export async function testEmailSettings(
   const res = await sendTestEmail(profile.tenant_id, to.trim() || profile.email || "");
   if (res.ok) return { ok: true };
   return { ok: false, error: res.error, skipped: "skipped" in res ? res.skipped : undefined };
+}
+
+export async function saveNotificationSettings(input: {
+  bookingConfirmations: boolean;
+  reminderEmails: boolean;
+  newBookingAlerts: boolean;
+  dailySummary: boolean;
+  smsReminders: boolean;
+  smsReminder24h: boolean;
+  smsReminder2h: boolean;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!supabaseEnvConfigured()) {
+    return { ok: false, error: "Preview mode — connect Supabase to save." };
+  }
+  const profile = await requireRole("business_owner");
+  if (!profile.tenant_id) return { ok: false, error: "No business found." };
+
+  const supabase = await createClient();
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("settings")
+    .eq("id", profile.tenant_id)
+    .maybeSingle();
+  const settings = (tenant?.settings ?? {}) as Record<string, unknown>;
+  const notificationSettings = {
+    booking_confirmations: input.bookingConfirmations,
+    reminder_emails: input.reminderEmails,
+    new_booking_alerts: input.newBookingAlerts,
+    daily_summary: input.dailySummary,
+    sms_reminders: input.smsReminders,
+    sms_reminder_24h: input.smsReminder24h,
+    sms_reminder_2h: input.smsReminder2h,
+  };
+
+  const { error } = await supabase
+    .from("tenants")
+    .update({ settings: { ...settings, notifications: notificationSettings } as Json })
+    .eq("id", profile.tenant_id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/dashboard/settings");
+  return { ok: true };
+}
+
+export async function startGoogleCalendarConnect(): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const profile = await requireRole("business_owner", "employee");
+  if (!profile.tenant_id) return { ok: false, error: "No business found." };
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return { ok: false, error: "Google Calendar isn't configured yet." };
+  }
+  return { ok: true, url: "/api/integrations/google/start" };
+}
+
+export async function testSmsConfiguration(
+  to: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!smsConfigured()) return { ok: false, error: "Twilio isn't configured yet." };
+  const profile = await requireRole("business_owner");
+  if (!profile.tenant_id) return { ok: false, error: "No business found." };
+  const { sendSms } = await import("@/lib/integrations/sms");
+  const result = await sendSms(to.trim(), "Diamond Booking test reminder: your SMS configuration is working.");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }

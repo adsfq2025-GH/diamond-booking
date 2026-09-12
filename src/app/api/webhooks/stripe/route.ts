@@ -113,8 +113,40 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
       break;
     }
 
-    // Deposit PaymentIntents (widget) could be reconciled here into the
-    // payments table once the deposit flow is live.
+    case "account.updated": {
+      const account = event.data.object as Stripe.Account;
+      await setTenant(
+        { column: "stripe_connect_account_id", value: account.id },
+        {
+          stripe_connect_status: account.details_submitted ? "connected" : "pending",
+          stripe_charges_enabled: Boolean(account.charges_enabled),
+          stripe_payouts_enabled: Boolean(account.payouts_enabled),
+        },
+      );
+      break;
+    }
+
+    case "payment_intent.succeeded":
+    case "payment_intent.payment_failed": {
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const tenantId = intent.metadata?.tenant_id;
+      const bookingId = intent.metadata?.booking_id;
+      if (!tenantId || !bookingId) break;
+      const admin = createAdminClient();
+      await admin.from("payments").upsert(
+        {
+          tenant_id: tenantId,
+          booking_id: bookingId,
+          stripe_payment_intent_id: intent.id,
+          amount_cents: intent.amount,
+          status: event.type === "payment_intent.succeeded" ? "succeeded" : "failed",
+          kind: intent.metadata?.kind ?? "payment",
+        },
+        { onConflict: "stripe_payment_intent_id" },
+      );
+      break;
+    }
+
     default:
       break;
   }

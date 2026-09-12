@@ -49,6 +49,8 @@ export type SubscriptionStatus =
 
 export type RequestStatus = "pending" | "approved" | "denied";
 
+export type ReminderStatus = "pending" | "sent" | "failed" | "cancelled";
+
 export interface Database {
   public: {
     Tables: {
@@ -69,6 +71,10 @@ export interface Database {
           trial_ends_at: string | null;
           stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
+          stripe_connect_account_id: string | null;
+          stripe_connect_status: string | null;
+          stripe_charges_enabled: boolean;
+          stripe_payouts_enabled: boolean;
           suspended: boolean;
           created_at: string;
           updated_at: string;
@@ -89,6 +95,10 @@ export interface Database {
           trial_ends_at?: string | null;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
+          stripe_connect_account_id?: string | null;
+          stripe_connect_status?: string | null;
+          stripe_charges_enabled?: boolean;
+          stripe_payouts_enabled?: boolean;
           suspended?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -109,6 +119,10 @@ export interface Database {
           trial_ends_at?: string | null;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
+          stripe_connect_account_id?: string | null;
+          stripe_connect_status?: string | null;
+          stripe_charges_enabled?: boolean;
+          stripe_payouts_enabled?: boolean;
           suspended?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -618,6 +632,96 @@ export interface Database {
           status?: PaymentStatus;
           kind?: string;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      google_calendar_connections: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          profile_id: string;
+          provider: string;
+          email: string | null;
+          calendar_id: string | null;
+          access_token: string | null;
+          refresh_token: string | null;
+          token_expires_at: string | null;
+          sync_enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          profile_id: string;
+          provider?: string;
+          email?: string | null;
+          calendar_id?: string | null;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          token_expires_at?: string | null;
+          sync_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          profile_id?: string;
+          provider?: string;
+          email?: string | null;
+          calendar_id?: string | null;
+          access_token?: string | null;
+          refresh_token?: string | null;
+          token_expires_at?: string | null;
+          sync_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      booking_reminders: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          booking_id: string;
+          customer_id: string | null;
+          channel: string;
+          scheduled_for: string;
+          sent_at: string | null;
+          status: ReminderStatus;
+          external_id: string | null;
+          error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          booking_id: string;
+          customer_id?: string | null;
+          channel: string;
+          scheduled_for: string;
+          sent_at?: string | null;
+          status?: ReminderStatus;
+          external_id?: string | null;
+          error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          booking_id?: string;
+          customer_id?: string | null;
+          channel?: string;
+          scheduled_for?: string;
+          sent_at?: string | null;
+          status?: ReminderStatus;
+          external_id?: string | null;
+          error?: string | null;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };

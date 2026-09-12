@@ -849,6 +849,25 @@ export interface EmailSettingsView {
   resendAvailable: boolean;
 }
 
+export interface IntegrationConnectionView {
+  stripe: {
+    connected: boolean;
+    accountId: string | null;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+  };
+  googleCalendar: {
+    connected: boolean;
+    email: string | null;
+    syncEnabled: boolean;
+  };
+  sms: {
+    enabled: boolean;
+    remind24h: boolean;
+    remind2h: boolean;
+  };
+}
+
 export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
   // Platform-level sender available if EITHER Resend or a platform SMTP is set.
   const resendAvailable = Boolean(
@@ -886,11 +905,89 @@ export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
   };
 });
 
+export const getNotificationSettings = cache(async (): Promise<NotificationSettingsView> => {
+  if (!supabaseEnvConfigured()) {
+    return {
+      bookingConfirmations: true,
+      reminderEmails: true,
+      newBookingAlerts: true,
+      dailySummary: false,
+      smsReminders: false,
+      smsReminder24h: true,
+      smsReminder2h: false,
+    };
+  }
+  const scope = await tenantScope();
+  if (!scope) {
+    throw new Error("Notification settings require a tenant-scoped authenticated user.");
+  }
+  const { supabase, tenantId } = scope;
+  const { data } = await supabase.from("tenants").select("settings").eq("id", tenantId).maybeSingle();
+  const notifications = ((data?.settings ?? {}) as { notifications?: Record<string, unknown> }).notifications ?? {};
+  return {
+    bookingConfirmations: notifications.booking_confirmations !== false,
+    reminderEmails: notifications.reminder_emails !== false,
+    newBookingAlerts: notifications.new_booking_alerts !== false,
+    dailySummary: notifications.daily_summary === true,
+    smsReminders: notifications.sms_reminders === true,
+    smsReminder24h: notifications.sms_reminder_24h !== false,
+    smsReminder2h: notifications.sms_reminder_2h === true,
+  };
+});
+
+export const getIntegrationConnections = cache(async (): Promise<IntegrationConnectionView> => {
+  if (!supabaseEnvConfigured()) {
+    return {
+      stripe: { connected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false },
+      googleCalendar: { connected: false, email: null, syncEnabled: false },
+      sms: { enabled: false, remind24h: true, remind2h: false },
+    };
+  }
+  const scope = await tenantScope();
+  if (!scope) {
+    throw new Error("Integration settings require a tenant-scoped authenticated user.");
+  }
+  const { supabase, tenantId } = scope;
+  const [{ data: tenant }, { data: calendar }] = await Promise.all([
+    supabase.from("tenants").select("settings, stripe_connect_account_id, stripe_charges_enabled, stripe_payouts_enabled").eq("id", tenantId).maybeSingle(),
+    supabase.from("google_calendar_connections").select("email, sync_enabled").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const notifications = ((tenant?.settings ?? {}) as { notifications?: Record<string, unknown> }).notifications ?? {};
+  return {
+    stripe: {
+      connected: Boolean(tenant?.stripe_connect_account_id),
+      accountId: tenant?.stripe_connect_account_id ?? null,
+      chargesEnabled: Boolean(tenant?.stripe_charges_enabled),
+      payoutsEnabled: Boolean(tenant?.stripe_payouts_enabled),
+    },
+    googleCalendar: {
+      connected: Boolean(calendar?.email),
+      email: calendar?.email ?? null,
+      syncEnabled: Boolean(calendar?.sync_enabled),
+    },
+    sms: {
+      enabled: notifications.sms_reminders === true,
+      remind24h: notifications.sms_reminder_24h !== false,
+      remind2h: notifications.sms_reminder_2h === true,
+    },
+  };
+});
+
 // ---------- Booking settings (Settings → Bookings) ----------
 
 export interface BookingSettingsView {
   recurringEnabled: boolean;
   autoConfirm: boolean;
+}
+
+export interface NotificationSettingsView {
+  bookingConfirmations: boolean;
+  reminderEmails: boolean;
+  newBookingAlerts: boolean;
+  dailySummary: boolean;
+  smsReminders: boolean;
+  smsReminder24h: boolean;
+  smsReminder2h: boolean;
 }
 
 export const getBookingSettings = cache(async (): Promise<BookingSettingsView> => {

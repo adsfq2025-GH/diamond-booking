@@ -2,6 +2,7 @@ import "server-only";
 import Stripe from "stripe";
 import { getStripePriceId } from "@/lib/plans";
 import type { PlanTier } from "@/types/database";
+import type { StripeConnectStatus } from "@/lib/integrations/types";
 
 /**
  * Stripe integration. Everything is behind STRIPE_SECRET_KEY: when it's unset
@@ -29,6 +30,58 @@ export function getStripe(): Stripe | null {
 }
 
 const appUrl = () => process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+export function stripeConnectConfigured(): boolean {
+  return stripeConfigured();
+}
+
+export async function createConnectAccountLink(opts: {
+  accountId?: string | null;
+  email: string;
+  businessName: string;
+}): Promise<{ ok: true; url: string; accountId: string } | { ok: false; error: string }> {
+  const stripe = getStripe();
+  if (!stripe) return { ok: false, error: "Stripe is not configured." };
+  try {
+    const account = opts.accountId
+      ? await stripe.accounts.retrieve(opts.accountId)
+      : await stripe.accounts.create({
+          type: "express",
+          email: opts.email,
+          business_type: "company",
+          business_profile: { name: opts.businessName },
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+          metadata: { product: "diamond-booking" },
+        });
+
+    const link = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: `${appUrl()}/dashboard/settings#integrations`,
+      return_url: `${appUrl()}/dashboard/settings#integrations`,
+      type: "account_onboarding",
+    });
+    return { ok: true, url: link.url, accountId: account.id };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Stripe error." };
+  }
+}
+
+export async function fetchConnectAccountStatus(accountId: string): Promise<StripeConnectStatus | null> {
+  const stripe = getStripe();
+  if (!stripe) return null;
+  const account = await stripe.accounts.retrieve(accountId);
+  return {
+    configured: true,
+    connected: true,
+    accountId: account.id,
+    chargesEnabled: Boolean(account.charges_enabled),
+    payoutsEnabled: Boolean(account.payouts_enabled),
+    onboardingComplete: Boolean(account.details_submitted),
+  };
+}
 
 /**
  * Create a Checkout Session for a subscription tier. Reuses/attaches the

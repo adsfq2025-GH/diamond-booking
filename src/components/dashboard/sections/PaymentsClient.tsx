@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { connectStripeAccount, refreshStripeConnectStatus } from "@/lib/actions/billing";
 import { money, shortDate, timeOfDay } from "@/lib/format";
 import { PLANS } from "@/lib/plans";
 import type { PaymentsData } from "@/lib/dashboard/types";
@@ -16,9 +18,32 @@ export function PaymentsClient({
 }) {
   const sub = data.subscription;
   const plan = PLANS[sub.plan];
+  const [busy, setBusy] = useState<null | "connect" | "refresh">(null);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function connect() {
+    setBusy("connect");
+    setNotice(null);
+    const res = await connectStripeAccount();
+    if (!res.ok) {
+      setNotice({ ok: false, msg: res.error });
+      setBusy(null);
+    }
+  }
+
+  async function refresh() {
+    setBusy("refresh");
+    setNotice(null);
+    const res = await refreshStripeConnectStatus();
+    setNotice(res.ok ? { ok: true, msg: "Stripe connection refreshed." } : { ok: false, msg: res.error });
+    setBusy(null);
+  }
 
   return (
     <div>
+      {notice ? (
+        <div className={"mb-5 rounded-[12px] border px-4 py-3 text-[0.82rem] " + (notice.ok ? "border-success-500/30 bg-success-50 text-success-700" : "border-[#e4b7b5] bg-[#fdf6f5] text-[#8c3531]")}>{notice.msg}</div>
+      ) : null}
       {!sub.paymentsEnabled && (
         <div className="mb-5 flex flex-col gap-3 rounded-[16px] border border-gold-300 bg-gold-50 px-5 py-4 min-[561px]:flex-row min-[561px]:items-center min-[561px]:justify-between">
           <div className="flex items-start gap-3">
@@ -32,13 +57,17 @@ export function PaymentsClient({
               </p>
             </div>
           </div>
-          <a
-            href="/dashboard/settings#integrations"
-            className="inline-flex flex-none items-center justify-center gap-2 rounded-[10px] bg-navy-900 px-4 py-2.5 text-[0.82rem] font-semibold text-white transition-colors hover:bg-navy-800"
-          >
-            Connect Stripe
-            <Icon name="arrowRight" className="h-4 w-4" />
-          </a>
+          <div className="flex gap-2">
+            <GhostBtn onClick={refresh}>{busy === "refresh" ? "Refreshing..." : "Refresh status"}</GhostBtn>
+            <button
+              type="button"
+              onClick={connect}
+              className="inline-flex flex-none items-center justify-center gap-2 rounded-[10px] bg-navy-900 px-4 py-2.5 text-[0.82rem] font-semibold text-white transition-colors hover:bg-navy-800"
+            >
+              {busy === "connect" ? "Connecting..." : "Connect Stripe"}
+              <Icon name="arrowRight" className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 

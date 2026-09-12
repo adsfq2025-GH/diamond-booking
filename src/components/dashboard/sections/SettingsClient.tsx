@@ -3,15 +3,18 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { PLANS, PLAN_ORDER } from "@/lib/plans";
-import { openBillingPortal, startCheckout } from "@/lib/actions/billing";
+import { connectStripeAccount, openBillingPortal, refreshStripeConnectStatus, startCheckout } from "@/lib/actions/billing";
 import {
   saveBookingSettings,
   saveBusinessProfile,
   saveEmailSettings,
+  saveNotificationSettings,
+  startGoogleCalendarConnect,
+  testSmsConfiguration,
   testEmailSettings,
 } from "@/lib/actions/settings";
 import { COMMON_TIMEZONES } from "@/lib/onboarding/types";
-import type { BookingSettingsView, BusinessProfile, EmailSettingsView } from "@/lib/dashboard/data";
+import type { BookingSettingsView, BusinessProfile, EmailSettingsView, IntegrationConnectionView, NotificationSettingsView } from "@/lib/dashboard/data";
 import type { PlanTier } from "@/types/database";
 import { Icon, type IconName } from "../icons";
 import { Panel, PanelHeader } from "../ui";
@@ -45,12 +48,16 @@ export function SettingsClient({
   booking,
   plan,
   integrations,
+  notificationSettings,
+  connections,
 }: {
   profile: BusinessProfile;
   email: EmailSettingsView;
   booking: BookingSettingsView;
   plan: PlanTier;
   integrations: IntegrationFlags;
+  notificationSettings: NotificationSettingsView;
+  connections: IntegrationConnectionView;
 }) {
   const [tab, setTab] = useState<TabKey>("profile");
 
@@ -98,8 +105,8 @@ export function SettingsClient({
         <div>
           {tab === "profile" && <ProfileTab profile={profile} />}
           {tab === "bookings" && <BookingsTab booking={booking} />}
-          {tab === "notifications" && <NotificationsTab plan={plan} />}
-          {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} />}
+          {tab === "notifications" && <NotificationsTab plan={plan} settings={notificationSettings} />}
+          {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} connections={connections} />}
           {tab === "security" && <SecurityTab />}
           {tab === "team" && <TeamPermissionsTab />}
           {tab === "billing" && <BillingTab plan={plan} />}
@@ -248,25 +255,62 @@ function BookingsTab({ booking }: { booking: BookingSettingsView }) {
   );
 }
 
-function NotificationsTab({ plan }: { plan: PlanTier }) {
+function NotificationsTab({ plan, settings }: { plan: PlanTier; settings: NotificationSettingsView }) {
   const sms = PLANS[plan].features.sms_reminders;
+  const [form, setForm] = useState(settings);
+  const [busy, setBusy] = useState<null | "save" | "test">(null);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function save() {
+    setBusy("save");
+    setNotice(null);
+    const res = await saveNotificationSettings(form);
+    setNotice(res.ok ? { ok: true, msg: "Notification settings saved." } : { ok: false, msg: res.error });
+    setBusy(null);
+  }
+
+  async function sendSmsTest() {
+    const phone = window.prompt("Send a test SMS to which phone number?");
+    if (!phone) return;
+    setBusy("test");
+    setNotice(null);
+    const res = await testSmsConfiguration(phone);
+    setNotice(res.ok ? { ok: true, msg: `Test SMS sent to ${phone}.` } : { ok: false, msg: res.error ?? "SMS test failed." });
+    setBusy(null);
+  }
+
   return (
     <Panel>
       <PanelHeader title="Notifications" caption="How you and your customers stay informed" />
       <div className="space-y-5 px-5 py-5">
-        <ToggleRow id="n1" label="Booking confirmations" desc="Email the customer when a booking is confirmed." on />
-        <ToggleRow id="n2" label="Reminders" desc="Send a reminder email 24 hours before each appointment." on />
-        <ToggleRow id="n3" label="New booking alerts" desc="Notify you whenever a new request comes in." on />
-        <ToggleRow id="n4" label="Daily summary" desc="A morning digest of the day's jobs." />
+        {notice ? <InlineNotice notice={notice} /> : null}
+        <ToggleRow id="n1" label="Booking confirmations" desc="Email the customer when a booking is confirmed." on={form.bookingConfirmations} onChange={(value) => setForm((prev) => ({ ...prev, bookingConfirmations: value }))} />
+        <ToggleRow id="n2" label="Reminders" desc="Send a reminder email 24 hours before each appointment." on={form.reminderEmails} onChange={(value) => setForm((prev) => ({ ...prev, reminderEmails: value }))} />
+        <ToggleRow id="n3" label="New booking alerts" desc="Notify you whenever a new request comes in." on={form.newBookingAlerts} onChange={(value) => setForm((prev) => ({ ...prev, newBookingAlerts: value }))} />
+        <ToggleRow id="n4" label="Daily summary" desc="A morning digest of the day's jobs." on={form.dailySummary} onChange={(value) => setForm((prev) => ({ ...prev, dailySummary: value }))} />
         <div className={cn(!sms && "opacity-60")}>
           <ToggleRow
             id="n5"
             label="SMS reminders"
             desc={sms ? "Text customers a reminder before the visit." : "Available on Professional and Elite plans."}
             locked={!sms}
+            on={form.smsReminders}
+            onChange={(value) => setForm((prev) => ({ ...prev, smsReminders: value }))}
           />
         </div>
-        <SaveBar />
+        {sms && form.smsReminders ? (
+          <div className="grid gap-3 rounded-[12px] border border-line bg-surface-alt/40 p-4">
+            <ToggleRow id="n6" label="24 hour reminder" desc="Send the first SMS reminder 24 hours before the booking." on={form.smsReminder24h} onChange={(value) => setForm((prev) => ({ ...prev, smsReminder24h: value }))} />
+            <ToggleRow id="n7" label="2 hour reminder" desc="Send a second reminder 2 hours before the booking." on={form.smsReminder2h} onChange={(value) => setForm((prev) => ({ ...prev, smsReminder2h: value }))} />
+            <div className="flex justify-end">
+              <GhostBtn onClick={sendSmsTest}>{busy === "test" ? "Sending…" : "Send test SMS"}</GhostBtn>
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-6 flex items-center justify-end gap-3 border-t border-line pt-5">
+          <GhostBtn onClick={() => setForm(settings)}>Reset</GhostBtn>
+          <ActionButton icon="check" onClick={save}>{busy === "save" ? "Saving…" : "Save changes"}</ActionButton>
+        </div>
       </div>
     </Panel>
   );
@@ -275,20 +319,56 @@ function NotificationsTab({ plan }: { plan: PlanTier }) {
 function IntegrationsTab({
   flags,
   email,
+  connections,
 }: {
   flags: IntegrationFlags;
   email: EmailSettingsView;
+  connections: IntegrationConnectionView;
 }) {
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [busy, setBusy] = useState<null | "stripe" | "stripe-refresh" | "google">(null);
   const items = [
-    { name: "Stripe", desc: "Accept deposits and card payments.", icon: "payments" as IconName, connected: flags.stripe, comingSoon: false },
-    { name: "Twilio", desc: "SMS reminders for appointments.", icon: "bell" as IconName, connected: flags.twilio, comingSoon: false },
-    { name: "Google Calendar", desc: "Two-way sync with your team's calendars.", icon: "calendar" as IconName, connected: flags.googleCalendar, comingSoon: true },
+    { name: "Stripe", desc: "Accept deposits and card payments.", icon: "payments" as IconName, connected: connections.stripe.connected, detail: connections.stripe.chargesEnabled ? "Charges enabled" : "Finish onboarding to accept charges" },
+    { name: "Twilio", desc: "SMS reminders for appointments.", icon: "bell" as IconName, connected: flags.twilio && connections.sms.enabled, detail: connections.sms.enabled ? `${connections.sms.remind24h ? "24h" : ""}${connections.sms.remind24h && connections.sms.remind2h ? " + " : ""}${connections.sms.remind2h ? "2h" : ""} reminders enabled` : "Enable SMS in Notifications" },
+    { name: "Google Calendar", desc: "Two-way sync with your team's calendars.", icon: "calendar" as IconName, connected: connections.googleCalendar.connected, detail: connections.googleCalendar.email ?? "Connect a calendar to sync bookings" },
   ];
+
+  async function connectStripe() {
+    setBusy("stripe");
+    setNotice(null);
+    const res = await connectStripeAccount();
+    if (!res.ok) {
+      setNotice({ ok: false, msg: res.error });
+      setBusy(null);
+    }
+  }
+
+  async function refreshStripe() {
+    setBusy("stripe-refresh");
+    setNotice(null);
+    const res = await refreshStripeConnectStatus();
+    setNotice(res.ok ? { ok: true, msg: "Stripe connection refreshed." } : { ok: false, msg: res.error });
+    setBusy(null);
+  }
+
+  async function connectGoogle() {
+    setBusy("google");
+    setNotice(null);
+    const res = await startGoogleCalendarConnect();
+    if (!res.ok) {
+      setNotice({ ok: false, msg: res.error });
+      setBusy(null);
+      return;
+    }
+    window.location.href = res.url;
+  }
+
   return (
     <div className="space-y-5">
       <EmailPanel email={email} />
       <Panel>
       <PanelHeader title="Integrations" caption="Connect the tools that power payments and messaging" />
+      <div className="px-5 pt-5">{notice ? <InlineNotice notice={notice} /> : null}</div>
       <ul className="divide-y divide-line">
         {items.map((it) => (
           <li key={it.name} className="flex items-center gap-4 px-5 py-4">
@@ -304,19 +384,37 @@ function IntegrationsTab({
                     Connected
                   </span>
                 )}
-                {it.comingSoon && !it.connected && (
-                  <span className="rounded-[var(--radius-pill)] bg-blue-50 px-2 py-[1px] text-[0.62rem] font-bold tracking-wide text-blue-700 uppercase">
-                    Soon
-                  </span>
-                )}
               </div>
               <p className="text-[0.8rem] text-ink-faint">{it.desc}</p>
+              <p className="mt-1 text-[0.74rem] text-ink-muted">{it.detail}</p>
             </div>
-            <GhostBtn>{it.connected ? "Manage" : it.comingSoon ? "Notify me" : "Connect"}</GhostBtn>
+            {it.name === "Stripe" ? (
+              <div className="flex gap-2">
+                <GhostBtn onClick={refreshStripe}>{busy === "stripe-refresh" ? "Refreshing…" : "Refresh"}</GhostBtn>
+                <GhostBtn onClick={connectStripe}>{busy === "stripe" ? "Connecting…" : it.connected ? "Continue setup" : "Connect"}</GhostBtn>
+              </div>
+            ) : it.name === "Google Calendar" ? (
+              <GhostBtn onClick={connectGoogle}>{busy === "google" ? "Connecting…" : it.connected ? "Reconnect" : "Connect"}</GhostBtn>
+            ) : (
+              <GhostBtn onClick={() => { window.location.hash = "notifications"; }}>{it.connected ? "Manage" : "Enable"}</GhostBtn>
+            )}
           </li>
         ))}
       </ul>
       </Panel>
+    </div>
+  );
+}
+
+function InlineNotice({ notice }: { notice: { ok: boolean; msg: string } }) {
+  return (
+    <div
+      className={cn(
+        "mb-4 rounded-[12px] border px-4 py-3 text-[0.82rem]",
+        notice.ok ? "border-success-500/30 bg-success-50 text-success-700" : "border-[#e4b7b5] bg-[#fdf6f5] text-[#8c3531]",
+      )}
+    >
+      {notice.msg}
     </div>
   );
 }
@@ -703,21 +801,22 @@ function ToggleRow({
   desc,
   on = false,
   locked = false,
+  onChange,
 }: {
   id: string;
   label: string;
   desc: string;
   on?: boolean;
   locked?: boolean;
+  onChange?: (next: boolean) => void;
 }) {
-  const [checked, setChecked] = useState(on);
   return (
     <Toggle
       id={id}
       label={label}
       description={desc}
-      checked={checked}
-      onChange={locked ? () => {} : setChecked}
+      checked={on}
+      onChange={locked ? () => {} : (next) => onChange?.(next)}
     />
   );
 }
