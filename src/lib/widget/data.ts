@@ -351,7 +351,7 @@ export async function createWidgetBooking(
   const admin = createAdminClient();
   const { data: bookingRow } = await admin
     .from("bookings")
-    .select("id, tenant_id, customer_id, starts_at, status, tenants(settings, stripe_charges_enabled)")
+    .select("id, tenant_id, customer_id, starts_at, status")
     .eq("id", result.booking_id)
     .maybeSingle();
 
@@ -382,7 +382,12 @@ export async function createWidgetBooking(
   }
 
   if (bookingRow?.tenant_id) {
-    const tenantSettings = ((Array.isArray(bookingRow.tenants) ? bookingRow.tenants[0]?.settings : bookingRow.tenants?.settings) ?? {}) as Record<string, unknown>;
+    const { data: tenantRow } = await admin
+      .from("tenants")
+      .select("settings, stripe_charges_enabled")
+      .eq("id", bookingRow.tenant_id)
+      .maybeSingle();
+    const tenantSettings = ((tenantRow?.settings ?? {}) as Record<string, unknown>);
     await scheduleBookingReminders({
       bookingId: result.booking_id,
       tenantId: bookingRow.tenant_id,
@@ -396,7 +401,7 @@ export async function createWidgetBooking(
     }
 
     const paymentsEnabled = tenantSettings.payments_enabled === true;
-    const chargesEnabled = Boolean(Array.isArray(bookingRow.tenants) ? bookingRow.tenants[0]?.stripe_charges_enabled : bookingRow.tenants?.stripe_charges_enabled);
+    const chargesEnabled = Boolean(tenantRow?.stripe_charges_enabled);
     if (paymentsEnabled && chargesEnabled && result.deposit_cents > 0 && svc) {
       const paymentIntent = await createDepositIntent({
         amountCents: result.deposit_cents,

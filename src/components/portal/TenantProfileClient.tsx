@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 import { money, relativeDay } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { saveAdminTenantNote, scheduleAdminTenantFollowUp } from "@/lib/actions/admin";
+import type { AdminTenantMutationState } from "@/lib/actions/admin";
 import type { AdminTenant } from "@/lib/portal/admin-data";
 import { Meter, Panel, PanelHeader, StatCard } from "@/components/dashboard/ui";
 import { ActionButton, GhostBtn } from "@/components/dashboard/sections/shared";
@@ -25,8 +26,8 @@ export function TenantProfileClient({
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [noteMessage, setNoteMessage] = useState<string | null>(null);
   const [followUpMessage, setFollowUpMessage] = useState<string | null>(null);
-  const [, noteAction, notePending] = useActionState(saveAdminTenantNote, null);
-  const [, followUpAction, followUpPending] = useActionState(scheduleAdminTenantFollowUp, null);
+  const [, noteAction, notePending] = useActionState<AdminTenantMutationState, FormData>(saveAdminTenantNote, null);
+  const [, followUpAction, followUpPending] = useActionState<AdminTenantMutationState, FormData>(scheduleAdminTenantFollowUp, null);
   function addNote(value: string) {
     if (!value) return;
     setNotes((prev) => [value, ...prev]);
@@ -133,8 +134,8 @@ export function TenantProfileClient({
                   setDraftNote("");
                   formData.set("tenantId", tenant.id);
                   formData.set("note", noteValue);
-                  const result = await noteAction(formData);
-                  if (result?.error) {
+                  const result = ((await noteAction(formData)) ?? null) as unknown as AdminTenantMutationState;
+                  if (result && result.error) {
                     setNoteMessage(result.error);
                     return;
                   }
@@ -207,7 +208,7 @@ export function TenantProfileClient({
           footer={
             <>
               <GhostBtn onClick={() => setShowFollowUpModal(false)}>Cancel</GhostBtn>
-              <ActionButton form="follow-up-form" type="submit" disabled={!followUpDraft || followUpPending}>
+              <ActionButton type="submit" disabled={!followUpDraft || followUpPending}>
                 {followUpPending ? "Saving..." : "Save follow-up"}
               </ActionButton>
             </>
@@ -222,8 +223,8 @@ export function TenantProfileClient({
               saveFollowUp(nextFollowUp);
               formData.set("tenantId", tenant.id);
               formData.set("followUpAt", nextFollowUp);
-              const result = await followUpAction(formData);
-              if (result?.error) {
+              const result = ((await followUpAction(formData)) ?? null) as unknown as AdminTenantMutationState;
+              if (result && result.error) {
                 setFollowUpMessage(result.error);
                 return;
               }

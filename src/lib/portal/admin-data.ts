@@ -145,7 +145,7 @@ export async function getAdminData(): Promise<AdminData> {
     admin.from("tenants").select("id, name, industry, timezone, plan, subscription_status, suspended, created_at, updated_at, settings"),
     admin.from("profiles").select("id, tenant_id, full_name, email, role, created_at"),
     admin.from("employees").select("id, tenant_id, active"),
-    admin.from("bookings").select("id, tenant_id, status, starts_at, created_at, price_cents, deposit_cents").order("starts_at", { ascending: false }),
+    admin.from("bookings").select("id, tenant_id, status, starts_at, created_at, updated_at, price_cents, deposit_cents").order("starts_at", { ascending: false }),
     admin.from("invoices").select("id, tenant_id, status, total_cents, due_at, created_at"),
     admin.from("widget_configs").select("tenant_id, active, created_at"),
     admin.from("feature_flags").select("key, description, enabled"),

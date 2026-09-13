@@ -48,7 +48,7 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
   const admin = createAdminClient();
 
   const setTenant = async (
-    match: { column: "id" | "stripe_customer_id" | "stripe_subscription_id"; value: string },
+    match: { column: "id" | "stripe_customer_id" | "stripe_subscription_id" | "stripe_connect_account_id"; value: string },
     patch: Record<string, unknown>,
   ) => {
     await admin

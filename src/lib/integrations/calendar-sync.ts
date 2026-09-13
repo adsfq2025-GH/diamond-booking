@@ -8,26 +8,35 @@ async function listConnectionsForBooking(bookingId: string) {
   const admin = createAdminClient();
   const { data: booking } = await admin
     .from("bookings")
-    .select("id, tenant_id, starts_at, ends_at, status, customers(full_name), services(name), employees(profile_id), tenants(name, timezone), google_calendar_connections(id, calendar_id, access_token, sync_enabled, synced_booking_events)")
+    .select("id, tenant_id, starts_at, ends_at, status, service_id, customer_id")
     .eq("id", bookingId)
     .maybeSingle();
 
   if (!booking) return null;
 
-  const connections = Array.isArray(booking.google_calendar_connections)
-    ? booking.google_calendar_connections
-    : booking.google_calendar_connections
-      ? [booking.google_calendar_connections]
-      : [];
+  const [{ data: services }, { data: customers }, { data: tenants }, { data: connections }] = await Promise.all([
+    admin.from("services").select("id, name").eq("tenant_id", booking.tenant_id).eq("id", booking.service_id),
+    admin.from("customers").select("id, full_name").eq("tenant_id", booking.tenant_id).eq("id", booking.customer_id),
+    admin.from("tenants").select("id, name, timezone").eq("id", booking.tenant_id).maybeSingle(),
+    admin.from("google_calendar_connections").select("id, calendar_id, access_token, sync_enabled, synced_booking_events").eq("tenant_id", booking.tenant_id),
+  ]);
 
-  return { admin, booking, connections };
+  return {
+    admin,
+    booking,
+    serviceName: services?.[0]?.name ?? "Booking",
+    customerName: customers?.[0]?.full_name ?? "Customer",
+    tenantName: tenants?.name ?? "business",
+    tenantTimeZone: tenants?.timezone || "America/New_York",
+    connections: connections ?? [],
+  };
 }
 
 export async function createCalendarEventForBooking(bookingId: string) {
   const context = await listConnectionsForBooking(bookingId);
   if (!context || context.booking.status === "cancelled") return;
 
-  const { admin, booking, connections } = context;
+  const { admin, booking, connections, serviceName, customerName, tenantName, tenantTimeZone } = context;
 
   for (const connection of connections) {
     if (!connection.sync_enabled || !connection.access_token) continue;
@@ -36,11 +45,11 @@ export async function createCalendarEventForBooking(bookingId: string) {
       accessToken: connection.access_token,
       calendarId: connection.calendar_id || "primary",
       eventId: synced[booking.id],
-      summary: `${Array.isArray(booking.services) ? booking.services[0]?.name : booking.services?.name ?? "Booking"} · ${Array.isArray(booking.customers) ? booking.customers[0]?.full_name : booking.customers?.full_name ?? "Customer"}`,
-      description: `Booking synced from Diamond Booking for ${Array.isArray(booking.tenants) ? booking.tenants[0]?.name : booking.tenants?.name ?? "business"}.`,
+      summary: `${serviceName} · ${customerName}`,
+      description: `Booking synced from Diamond Booking for ${tenantName}.`,
       startsAt: booking.starts_at,
       endsAt: booking.ends_at,
-      timeZone: (Array.isArray(booking.tenants) ? booking.tenants[0]?.timezone : booking.tenants?.timezone) || "America/New_York",
+      timeZone: tenantTimeZone,
     });
     await admin
       .from("google_calendar_connections")

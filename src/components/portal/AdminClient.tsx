@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { money, moneyCompact, percent, relativeDay } from "@/lib/format";
 import type { AdminData, AdminTenant } from "@/lib/portal/admin-data";
 import { resetAdminTenantOnboarding, restoreAdminTenant, suspendAdminTenant } from "@/lib/actions/admin";
+import type { AdminTenantMutationState } from "@/lib/actions/admin";
 import { BarChart, RevenueBarChart, SegmentBar } from "@/components/dashboard/charts";
 import { Icon } from "@/components/dashboard/icons";
 import { Meter, Panel, PanelHeader, StatCard } from "@/components/dashboard/ui";
@@ -90,9 +91,9 @@ export function AdminClient({
   const [actionReason, setActionReason] = useState("");
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [, suspendAction, suspendPending] = useActionState(suspendAdminTenant, null);
-  const [, restoreAction, restorePending] = useActionState(restoreAdminTenant, null);
-  const [, resetOnboardingAction, resetOnboardingPending] = useActionState(resetAdminTenantOnboarding, null);
+  const [, suspendAction, suspendPending] = useActionState<AdminTenantMutationState, FormData>(suspendAdminTenant, null);
+  const [, restoreAction, restorePending] = useActionState<AdminTenantMutationState, FormData>(restoreAdminTenant, null);
+  const [, resetOnboardingAction, resetOnboardingPending] = useActionState<AdminTenantMutationState, FormData>(resetAdminTenantOnboarding, null);
 
   const filteredTenants = useMemo(
     () =>
@@ -786,7 +787,7 @@ export function AdminClient({
             <>
               <GhostBtn onClick={() => setActionDraft(null)}>Cancel</GhostBtn>
               <ActionButton
-                icon={actionDraft.kind === "suspend" ? "warning" : "checkCircle"}
+                icon={actionDraft.kind === "suspend" ? "close" : "check"}
                 type="submit"
                 form="tenant-action-form"
                 disabled={!actionReason.trim() || actionPending}
@@ -803,12 +804,12 @@ export function AdminClient({
               setActionMessage(null);
               formData.set("tenantId", draftTenant.id);
               formData.set("reason", actionReason);
-              const result = actionDraft.kind === "suspend"
+              const result = ((actionDraft.kind === "suspend"
                 ? await suspendAction(formData)
                 : actionDraft.kind === "restore"
                   ? await restoreAction(formData)
-                  : await resetOnboardingAction(formData);
-              if (result?.error) {
+                  : await resetOnboardingAction(formData)) ?? null) as unknown as AdminTenantMutationState;
+              if (result && result.error) {
                 setActionMessage(result.error);
                 return;
               }

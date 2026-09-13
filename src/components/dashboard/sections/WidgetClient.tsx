@@ -43,7 +43,6 @@ export function WidgetClient({
       primaryColor: color,
       radius: `${radius}px`,
       layout: data.layout,
-      allowedDomains: data.allowedDomains,
       customFields,
       allowedDomains,
       active: data.active,
