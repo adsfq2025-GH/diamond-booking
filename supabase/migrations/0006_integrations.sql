@@ -15,6 +15,7 @@ create table if not exists public.google_calendar_connections (
   refresh_token text,
   token_expires_at timestamptz,
   sync_enabled boolean not null default true,
+  synced_booking_events jsonb not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (profile_id, provider)

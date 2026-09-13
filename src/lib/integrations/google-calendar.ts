@@ -87,3 +87,52 @@ export async function fetchGoogleCalendars(accessToken: string) {
     items?: Array<{ id: string; summary: string; primary?: boolean }>;
   }>;
 }
+
+export async function upsertGoogleCalendarEvent(input: {
+  accessToken: string;
+  calendarId: string;
+  eventId?: string;
+  summary: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  timeZone: string;
+}): Promise<{ id: string }> {
+  const url = input.eventId
+    ? `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`
+    : `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events`;
+  const res = await fetch(url, {
+    method: input.eventId ? "PUT" : "POST",
+    headers: {
+      Authorization: `Bearer ${input.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      summary: input.summary,
+      description: input.description,
+      start: { dateTime: input.startsAt, timeZone: input.timeZone },
+      end: { dateTime: input.endsAt, timeZone: input.timeZone },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error("Google event sync failed.");
+  }
+  return res.json() as Promise<{ id: string }>;
+}
+
+export async function deleteGoogleCalendarEvent(input: {
+  accessToken: string;
+  calendarId: string;
+  eventId: string;
+}) {
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${input.accessToken}` },
+    },
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error("Google event delete failed.");
+  }
+}

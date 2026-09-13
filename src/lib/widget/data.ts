@@ -9,6 +9,8 @@ import "server-only";
 import { supabaseEnvConfigured } from "@/lib/env";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
+import { createCalendarEventForBooking } from "@/lib/integrations/calendar-sync";
+import { createDepositIntent } from "@/lib/integrations/stripe";
 import { computeOccurrences, type RecurrenceRule } from "@/lib/recurrence";
 import type {
   AvailableSlot,
@@ -269,6 +271,40 @@ async function materializeRecurrence(
   }
 }
 
+async function scheduleBookingReminders(input: {
+  bookingId: string;
+  tenantId: string;
+  customerId?: string | null;
+  startsAt: string;
+  notifications: Record<string, unknown>;
+}) {
+  const admin = createAdminClient();
+  const reminders: Array<{ channel: string; scheduled_for: string }> = [];
+  const startsAt = new Date(input.startsAt).getTime();
+  if (input.notifications.sms_reminders === true && input.notifications.sms_reminder_24h !== false) {
+    reminders.push({ channel: "sms", scheduled_for: new Date(startsAt - 24 * 60 * 60 * 1000).toISOString() });
+  }
+  if (input.notifications.sms_reminders === true && input.notifications.sms_reminder_2h === true) {
+    reminders.push({ channel: "sms", scheduled_for: new Date(startsAt - 2 * 60 * 60 * 1000).toISOString() });
+  }
+  if (input.notifications.reminder_emails !== false) {
+    reminders.push({ channel: "email", scheduled_for: new Date(startsAt - 24 * 60 * 60 * 1000).toISOString() });
+  }
+  if (reminders.length === 0) return;
+  await admin.from("booking_reminders").upsert(
+    reminders.map((reminder) => ({
+      tenant_id: input.tenantId,
+      booking_id: input.bookingId,
+      customer_id: input.customerId ?? null,
+      channel: reminder.channel,
+      scheduled_for: reminder.scheduled_for,
+      status: "pending",
+      updated_at: new Date().toISOString(),
+    })),
+    { onConflict: "booking_id,channel,scheduled_for" },
+  );
+}
+
 /** Create the booking via RPC, or synthesize a confirmation in preview mode. */
 export async function createWidgetBooking(
   input: CreateBookingInput,
@@ -312,6 +348,13 @@ export async function createWidgetBooking(
   }
   const result = data as unknown as WidgetBookingResult;
 
+  const admin = createAdminClient();
+  const { data: bookingRow } = await admin
+    .from("bookings")
+    .select("id, tenant_id, customer_id, starts_at, status, tenants(settings, stripe_charges_enabled)")
+    .eq("id", result.booking_id)
+    .maybeSingle();
+
   // Reserve future occurrences on the calendar (blocks availability).
   if (input.recurrence && input.recurrence !== "none") {
     await materializeRecurrence(
@@ -336,6 +379,35 @@ export async function createWidgetBooking(
       priceText: `$${(result.price_cents / 100).toFixed(2)}`,
       addressText: (input.address as { line1?: string } | null)?.line1 ?? undefined,
     }).catch(() => {});
+  }
+
+  if (bookingRow?.tenant_id) {
+    const tenantSettings = ((Array.isArray(bookingRow.tenants) ? bookingRow.tenants[0]?.settings : bookingRow.tenants?.settings) ?? {}) as Record<string, unknown>;
+    await scheduleBookingReminders({
+      bookingId: result.booking_id,
+      tenantId: bookingRow.tenant_id,
+      customerId: bookingRow.customer_id,
+      startsAt: result.starts_at,
+      notifications: (tenantSettings.notifications as Record<string, unknown> | undefined) ?? {},
+    }).catch(() => {});
+
+    if (result.status === "confirmed") {
+      await createCalendarEventForBooking(result.booking_id).catch(() => {});
+    }
+
+    const paymentsEnabled = tenantSettings.payments_enabled === true;
+    const chargesEnabled = Boolean(Array.isArray(bookingRow.tenants) ? bookingRow.tenants[0]?.stripe_charges_enabled : bookingRow.tenants?.stripe_charges_enabled);
+    if (paymentsEnabled && chargesEnabled && result.deposit_cents > 0 && svc) {
+      const paymentIntent = await createDepositIntent({
+        amountCents: result.deposit_cents,
+        tenantId: bookingRow.tenant_id,
+        bookingId: result.booking_id,
+        customerEmail: input.customerEmail,
+      }).catch(() => ({ ok: false as const, error: "Stripe error." }));
+      if (paymentIntent.ok) {
+        result.deposit_client_secret = paymentIntent.clientSecret;
+      }
+    }
   }
 
   return { ok: true, result };

@@ -723,6 +723,13 @@ function DoneStep({
         <Row label="Total" value={money(result.price_cents)} />
         {result.deposit_cents > 0 && <Row label="Deposit due" value={money(result.deposit_cents)} />}
       </div>
+      {result.deposit_cents > 0 && (
+        <div className="mt-4 rounded-[12px] border border-gold-300 bg-gold-50 px-4 py-3 text-left text-[0.82rem] text-ink-muted">
+          {result.deposit_client_secret
+            ? "Stripe deposit intent created successfully. Payment capture UI is the next step to wire into this screen."
+            : "Your booking was created. If online payments are enabled for this business, the deposit will be collected in the next payment step."}
+        </div>
+      )}
       <p className="mt-4 text-[0.8rem] text-ink-faint">
         {emailWillSend ? (
           <>

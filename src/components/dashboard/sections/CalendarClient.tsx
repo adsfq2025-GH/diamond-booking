@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { rescheduleBooking } from "@/lib/actions/bookings";
 import { cn } from "@/lib/cn";
 import { timeRange, zonedHourFraction, zonedYmd } from "@/lib/format";
 import { recurrenceLabel } from "@/lib/recurrence";
@@ -44,11 +46,14 @@ export function CalendarClient({
   data: CalendarData;
   timezone: string;
 }) {
+  const router = useRouter();
   const [events, setEvents] = useState(data.events);
   const [view, setView] = useState<ViewMode>("week");
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<CalendarEvent | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isSaving, startTransition] = useTransition();
 
   const visibleEvents = useMemo(
     () => events.filter((e) => !hidden.has(e.employeeId)),
@@ -65,17 +70,65 @@ export function CalendarClient({
   }
 
   function reschedule(id: string, newStart: Date) {
+    const current = events.find((event) => event.id === id);
+    if (!current) return;
+    const previousStart = current.startsAt;
+    const previousEnd = current.endsAt;
+    const nextStart = newStart.toISOString();
     setEvents((prev) =>
       prev.map((e) => {
         if (e.id !== id) return e;
         const dur = new Date(e.endsAt).getTime() - new Date(e.startsAt).getTime();
         return {
           ...e,
-          startsAt: newStart.toISOString(),
+          startsAt: nextStart,
           endsAt: new Date(newStart.getTime() + dur).toISOString(),
+          status: e.status === "pending" ? "pending" : "rescheduled",
         };
       }),
     );
+    setSelected((prev) =>
+      prev && prev.id === id
+        ? {
+            ...prev,
+            startsAt: nextStart,
+            endsAt: new Date(newStart.getTime() + (new Date(previousEnd).getTime() - new Date(previousStart).getTime())).toISOString(),
+            status: prev.status === "pending" ? "pending" : "rescheduled",
+          }
+        : prev,
+    );
+    setNotice("Saving calendar change…");
+    startTransition(async () => {
+      const result = await rescheduleBooking(id, nextStart);
+      if (!result.ok) {
+        setEvents((prev) =>
+          prev.map((e) =>
+            e.id === id
+              ? {
+                  ...e,
+                  startsAt: previousStart,
+                  endsAt: previousEnd,
+                  status: current.status,
+                }
+              : e,
+          ),
+        );
+        setSelected((prev) =>
+          prev && prev.id === id
+            ? {
+                ...prev,
+                startsAt: previousStart,
+                endsAt: previousEnd,
+                status: current.status,
+              }
+            : prev,
+        );
+        setNotice(result.error ?? "Could not reschedule this booking.");
+        return;
+      }
+      setNotice("Booking rescheduled.");
+      router.refresh();
+    });
   }
 
   function shift(dir: number) {
@@ -144,6 +197,13 @@ export function CalendarClient({
           ))}
         </div>
       </div>
+
+      {notice && (
+        <div className="mb-4 rounded-[12px] border border-line bg-surface-alt/60 px-4 py-3 text-[0.82rem] text-ink-muted">
+          {notice}
+          {isSaving ? "" : null}
+        </div>
+      )}
 
       {/* Employee legend */}
       <div className="mb-4 flex flex-wrap items-center gap-2">

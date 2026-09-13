@@ -647,6 +647,7 @@ export interface Database {
           refresh_token: string | null;
           token_expires_at: string | null;
           sync_enabled: boolean;
+          synced_booking_events: Json;
           created_at: string;
           updated_at: string;
         };
@@ -661,6 +662,7 @@ export interface Database {
           refresh_token?: string | null;
           token_expires_at?: string | null;
           sync_enabled?: boolean;
+          synced_booking_events?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -675,6 +677,7 @@ export interface Database {
           refresh_token?: string | null;
           token_expires_at?: string | null;
           sync_enabled?: boolean;
+          synced_booking_events?: Json;
           created_at?: string;
           updated_at?: string;
         };
