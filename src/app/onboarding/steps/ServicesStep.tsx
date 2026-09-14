@@ -49,18 +49,6 @@ function formatPrice(cents: number): string {
     : `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-function minutesToHoursDisplay(minutes: number): string {
-  if (!minutes) return "";
-  const hours = minutes / 60;
-  return Number.isInteger(hours) ? String(hours) : String(Math.round(hours * 100) / 100);
-}
-
-function hoursToMinutes(raw: string): number {
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.round(parsed * 60);
-}
-
 /** "120" -> 12000 cents; tolerant of blank/partial input. */
 function dollarsToCents(raw: string): number {
   const parsed = Number.parseFloat(raw);
@@ -277,22 +265,15 @@ export function ServicesStep({
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 min-[641px]:col-span-2">
+              <div className="grid grid-cols-1 gap-4 min-[641px]:col-span-2 min-[641px]:grid-cols-3">
                 <div>
-                  <Label htmlFor={`${s.localId}-duration`}>Duration (hours)</Label>
-                  <input
-                    id={`${s.localId}-duration`}
-                    type="number"
-                    min={0.5}
-                    step={0.5}
-                    value={minutesToHoursDisplay(s.duration_minutes)}
-                    onChange={(e) =>
-                      update(s.localId, {
-                        duration_minutes: hoursToMinutes(e.target.value),
-                      })
-                    }
-                    className={inputBase}
-                  />
+                  <Label htmlFor={`${s.localId}-pricing-type`}>Pricing unit</Label>
+                  <select id={`${s.localId}-pricing-type`} className={inputBase} defaultValue="hourly">
+                    <option value="flat">Flat rate</option>
+                    <option value="hourly">Per hour</option>
+                    <option value="square-foot">Per square foot</option>
+                    <option value="custom">Other unit</option>
+                  </select>
                 </div>
                 <div>
                   <Label htmlFor={`${s.localId}-price`}>Price ($)</Label>
@@ -309,12 +290,23 @@ export function ServicesStep({
                     className={inputBase}
                   />
                 </div>
+                <div>
+                  <Label htmlFor={`${s.localId}-min-hours`}>Minimum hours</Label>
+                  <input
+                    id={`${s.localId}-min-hours`}
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    placeholder="2"
+                    className={inputBase}
+                  />
+                </div>
               </div>
 
               <div className="min-[641px]:col-span-2 rounded-[12px] border border-dashed border-line bg-card px-4 py-3">
                 <p className="text-[0.82rem] font-semibold text-ink">Pricing options needed next</p>
                 <p className="mt-1 text-[0.76rem] leading-[1.55] text-ink-faint">
-                  This form now uses hours instead of minutes. The next live data step is wiring true per-hour and per-square-foot pricing rules into storage and booking calculations.
+                  Services and add-ons are visually separated now. This section is ready for the next live pricing pass so each service can store its own unit and minimum requirement.
                 </p>
               </div>
 
