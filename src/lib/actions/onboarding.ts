@@ -134,7 +134,10 @@ export async function saveServices(
       tenant_id: ctx.tenantId,
       name: s.name,
       category: s.category || null,
-      duration_minutes: Math.max(5, Math.round(s.duration_minutes) || 60),
+      duration_minutes:
+        s.pricing_unit === "hourly"
+          ? Math.max(30, Math.round((s.minimum_hours ?? 1) * 60))
+          : 60,
       price_cents: Math.max(0, Math.round(s.price_cents) || 0),
       deposit_cents: Math.max(0, Math.round(s.deposit_cents) || 0),
       buffer_before_minutes: Math.max(0, Math.round(s.buffer_before_minutes) || 0),
@@ -149,29 +152,6 @@ export async function saveServices(
     if (insertError || !inserted) throw insertError ?? new Error("insert failed");
 
     // Insert add-ons per service (inserted[] is parallel to clean[]).
-    const addonRows: TablesInsert<"service_addons">[] = [];
-    clean.forEach((s, i) => {
-      const serviceId = inserted[i]?.id;
-      if (!serviceId) return;
-      for (const a of s.addons ?? []) {
-        const name = a.name.trim();
-        if (!name) continue;
-        addonRows.push({
-          tenant_id: ctx.tenantId,
-          service_id: serviceId,
-          name,
-          price_cents: Math.max(0, Math.round(a.price_cents) || 0),
-          duration_minutes: Math.max(0, Math.round(a.duration_minutes) || 0),
-        });
-      }
-    });
-    if (addonRows.length > 0) {
-      const { error: addonError } = await ctx.supabase
-        .from("service_addons")
-        .insert(addonRows);
-      if (addonError) throw addonError;
-    }
-
     await mergeSettings(ctx, {}, 3);
     return { ok: true, ids: inserted.map((r) => r.id) };
   } catch (err) {

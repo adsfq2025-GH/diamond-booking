@@ -50,18 +50,22 @@ export interface ServiceAddonInput {
   duration_minutes: number;
 }
 
+export interface GlobalAddonInput extends ServiceAddonInput {
+  category?: string;
+}
+
 export interface ServiceInput {
   /** Client-side key, stable across saves. */
   localId: string;
   name: string;
   category: string;
-  duration_minutes: number;
   price_cents: number;
   deposit_cents: number;
   buffer_before_minutes: number;
   buffer_after_minutes: number;
-  /** Optional add-on services customers can tack on (e.g. inside fridge). */
-  addons: ServiceAddonInput[];
+  pricing_unit?: "flat" | "hourly" | "square_foot" | "custom";
+  custom_pricing_unit_label?: string;
+  minimum_hours?: number;
 }
 
 export interface TeamMemberInput {
@@ -121,6 +125,7 @@ export interface LaunchReadiness {
 export interface WizardData {
   business: BusinessInfoInput;
   services: ServiceInput[];
+  addons?: GlobalAddonInput[];
   team: TeamInput;
   hours: HoursInput;
   branding: BrandingInput;

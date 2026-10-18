@@ -95,19 +95,19 @@ export default async function OnboardingPage({
       localId: s.id,
       name: s.name,
       category: s.category ?? "",
-      duration_minutes: s.duration_minutes,
       price_cents: s.price_cents,
       deposit_cents: s.deposit_cents,
       buffer_before_minutes: s.buffer_before_minutes,
       buffer_after_minutes: s.buffer_after_minutes,
-      addons: (addons ?? [])
-        .filter((a) => a.service_id === s.id)
-        .map((a) => ({
-          localId: a.id,
-          name: a.name,
-          price_cents: a.price_cents,
-          duration_minutes: a.duration_minutes,
-        })),
+      pricing_unit: "hourly",
+      custom_pricing_unit_label: "",
+      minimum_hours: Math.max(1, Math.round((s.duration_minutes / 60) * 2) / 2),
+    })),
+    addons: (addons ?? []).map((a) => ({
+      localId: a.id,
+      name: a.name,
+      price_cents: a.price_cents,
+      duration_minutes: a.duration_minutes,
     })),
     team: {
       ownerBookable: Boolean(ownerRow),

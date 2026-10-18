@@ -5,7 +5,7 @@ import { Em } from "@/components/ui/SectionHeading";
 import { Label, inputBase } from "@/components/ui/Field";
 import { StepHeader, StepFooter, GhostButton, WizardError } from "../wizard-ui";
 import { templatesForIndustry } from "@/lib/onboarding/templates";
-import type { ServiceInput, ServiceAddonInput } from "@/lib/onboarding/types";
+import type { GlobalAddonInput, ServiceInput } from "@/lib/onboarding/types";
 import { cn } from "@/lib/cn";
 
 let localSeq = 0;
@@ -23,16 +23,17 @@ function blankService(): ServiceInput {
     localId: nextLocalId(),
     name: "",
     category: "",
-    duration_minutes: 60,
     price_cents: 0,
     deposit_cents: 0,
     buffer_before_minutes: 0,
     buffer_after_minutes: 15,
-    addons: [],
+    pricing_unit: "hourly",
+    custom_pricing_unit_label: "",
+    minimum_hours: 2,
   };
 }
 
-function blankAddon(): ServiceAddonInput {
+function blankAddon(): GlobalAddonInput {
   return { localId: nextAddonId(), name: "", price_cents: 0, duration_minutes: 0 };
 }
 
@@ -70,6 +71,7 @@ export function ServicesStep({
   onBack: () => void;
 }) {
   const [services, setServices] = useState<ServiceInput[]>(value);
+  const [addons, setAddons] = useState<GlobalAddonInput[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const templates = templatesForIndustry(industry);
@@ -83,17 +85,13 @@ export function ServicesStep({
         localId: nextLocalId(),
         name: t.name,
         category: t.category,
-        duration_minutes: t.duration_minutes,
         price_cents: t.price_cents,
         deposit_cents: t.deposit_cents,
         buffer_before_minutes: t.buffer_before_minutes,
         buffer_after_minutes: t.buffer_after_minutes,
-        addons: (t.addons ?? []).map((a) => ({
-          localId: nextAddonId(),
-          name: a.name,
-          price_cents: a.price_cents,
-          duration_minutes: a.duration_minutes,
-        })),
+        pricing_unit: "hourly",
+        custom_pricing_unit_label: "",
+        minimum_hours: Math.max(1, Math.round((t.duration_minutes / 60) * 2) / 2),
       },
     ]);
     setError(null);
@@ -109,34 +107,14 @@ export function ServicesStep({
     setServices((list) => list.filter((s) => s.localId !== localId));
   };
 
-  const addAddon = (serviceId: string) => {
-    setServices((list) =>
-      list.map((s) =>
-        s.localId === serviceId ? { ...s, addons: [...s.addons, blankAddon()] } : s,
-      ),
-    );
+  const addAddon = () => {
+    setAddons((list) => [...list, blankAddon()]);
   };
-  const updateAddon = (
-    serviceId: string,
-    addonId: string,
-    patch: Partial<ServiceAddonInput>,
-  ) => {
-    setServices((list) =>
-      list.map((s) =>
-        s.localId === serviceId
-          ? { ...s, addons: s.addons.map((a) => (a.localId === addonId ? { ...a, ...patch } : a)) }
-          : s,
-      ),
-    );
+  const updateAddon = (addonId: string, patch: Partial<GlobalAddonInput>) => {
+    setAddons((list) => list.map((a) => (a.localId === addonId ? { ...a, ...patch } : a)));
   };
-  const removeAddon = (serviceId: string, addonId: string) => {
-    setServices((list) =>
-      list.map((s) =>
-        s.localId === serviceId
-          ? { ...s, addons: s.addons.filter((a) => a.localId !== addonId) }
-          : s,
-      ),
-    );
+  const removeAddon = (addonId: string) => {
+    setAddons((list) => list.filter((a) => a.localId !== addonId));
   };
 
   const submit = (e: React.FormEvent) => {
@@ -146,8 +124,8 @@ export function ServicesStep({
       setError("Add at least one service — pick a template or create your own.");
       return;
     }
-    if (named.some((s) => s.duration_minutes <= 0)) {
-      setError("Every service needs a duration of at least 5 minutes.");
+    if (named.some((s) => s.pricing_unit === "hourly" && (s.minimum_hours ?? 0) <= 0)) {
+      setError("Hourly services need a minimum hours value greater than 0.");
       return;
     }
     onSubmit(named);
@@ -197,7 +175,7 @@ export function ServicesStep({
                   <span aria-hidden>{added ? "✓" : "+"}</span>
                   {t.name}
                   <span className={cn("font-normal", added ? "text-success-700/80" : "text-ink-faint")}>
-                    {formatDuration(t.duration_minutes)} · {formatPrice(t.price_cents)}
+                    {Math.round((t.duration_minutes / 60) * 10) / 10}h · {formatPrice(t.price_cents)}
                   </span>
                 </button>
               );
@@ -265,13 +243,18 @@ export function ServicesStep({
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 min-[641px]:col-span-2 min-[641px]:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 min-[641px]:col-span-2 min-[641px]:grid-cols-4">
                 <div>
                   <Label htmlFor={`${s.localId}-pricing-type`}>Pricing unit</Label>
-                  <select id={`${s.localId}-pricing-type`} className={inputBase} defaultValue="hourly">
+                  <select
+                    id={`${s.localId}-pricing-type`}
+                    className={inputBase}
+                    value={s.pricing_unit ?? "hourly"}
+                    onChange={(e) => update(s.localId, { pricing_unit: e.target.value as ServiceInput["pricing_unit"] })}
+                  >
                     <option value="flat">Flat rate</option>
                     <option value="hourly">Per hour</option>
-                    <option value="square-foot">Per square foot</option>
+                    <option value="square_foot">Per square foot</option>
                     <option value="custom">Other unit</option>
                   </select>
                 </div>
@@ -297,16 +280,31 @@ export function ServicesStep({
                     type="number"
                     min={0}
                     step={0.5}
+                    value={s.minimum_hours ?? ""}
                     placeholder="2"
+                    onChange={(e) => update(s.localId, { minimum_hours: Number.parseFloat(e.target.value) || 0 })}
+                    className={inputBase}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor={`${s.localId}-custom-unit`} hint="Optional">
+                    Custom unit label
+                  </Label>
+                  <input
+                    id={`${s.localId}-custom-unit`}
+                    type="text"
+                    placeholder="Per room"
+                    value={s.custom_pricing_unit_label ?? ""}
+                    onChange={(e) => update(s.localId, { custom_pricing_unit_label: e.target.value })}
                     className={inputBase}
                   />
                 </div>
               </div>
 
               <div className="min-[641px]:col-span-2 rounded-[12px] border border-dashed border-line bg-card px-4 py-3">
-                <p className="text-[0.82rem] font-semibold text-ink">Pricing options needed next</p>
+                <p className="text-[0.82rem] font-semibold text-ink">Pricing setup</p>
                 <p className="mt-1 text-[0.76rem] leading-[1.55] text-ink-faint">
-                  Services and add-ons are visually separated now. This section is ready for the next live pricing pass so each service can store its own unit and minimum requirement.
+                  Set how this service is priced. Use minimum hours for hourly jobs, or switch to square-foot or a custom unit when the niche needs it.
                 </p>
               </div>
 
@@ -365,67 +363,6 @@ export function ServicesStep({
               </div>
             </div>
 
-            {/* Add-ons — optional extras customers can tack on when booking */}
-            <div className="mt-6 rounded-[14px] border border-line bg-surface-alt/30 p-4">
-              <p className="mb-2.5 text-[0.78rem] font-semibold text-ink">
-                Add-ons{" "}
-                <span className="font-normal text-ink-faint">
-                  — separate optional extras, not part of the main service package
-                </span>
-              </p>
-              {s.addons.length > 0 && (
-                <div className="mb-2.5 flex flex-col gap-2">
-                  {s.addons.map((a) => (
-                    <div key={a.localId} className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Inside fridge"
-                        value={a.name}
-                        onChange={(e) =>
-                          updateAddon(s.localId, a.localId, { name: e.target.value })
-                        }
-                        className={cn(inputBase, "flex-1")}
-                        aria-label="Add-on name"
-                      />
-                      <div className="relative w-[104px] flex-none">
-                        <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[0.85rem] text-ink-faint">
-                          $
-                        </span>
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          placeholder="0"
-                          value={a.price_cents ? a.price_cents / 100 : ""}
-                          onChange={(e) =>
-                            updateAddon(s.localId, a.localId, {
-                              price_cents: dollarsToCents(e.target.value),
-                            })
-                          }
-                          className={cn(inputBase, "pl-7")}
-                          aria-label="Add-on price"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeAddon(s.localId, a.localId)}
-                        aria-label="Remove add-on"
-                        className="flex-none cursor-pointer rounded-[8px] px-2.5 py-2 text-[0.85rem] text-ink-faint transition-colors hover:bg-[#fdf6f5] hover:text-[#a63d39]"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => addAddon(s.localId)}
-                className="cursor-pointer text-[0.82rem] font-semibold text-blue-600 transition-colors hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-              >
-                + Add an add-on
-              </button>
-            </div>
           </div>
         ))}
       </div>
@@ -439,6 +376,68 @@ export function ServicesStep({
         >
           + Add a custom service
         </GhostButton>
+      </div>
+
+      <div className="mt-8 rounded-[16px] border border-line bg-card p-4 shadow-[0_1px_3px_rgb(12_36_64/0.05)] min-[521px]:p-5">
+        <div className="mb-4">
+          <p className="text-[0.82rem] font-semibold text-ink">
+            Add-ons <span className="font-normal text-ink-faint">— separate optional extras customers can add to any service</span>
+          </p>
+          <p className="mt-1 text-[0.76rem] leading-[1.55] text-ink-faint">
+            Customers pick a main service first, then choose from these available extras if they want them.
+          </p>
+        </div>
+
+        {addons.length === 0 ? (
+          <div className="rounded-[12px] border border-dashed border-line-strong bg-surface-alt/50 px-4 py-5 text-[0.82rem] text-ink-faint">
+            No add-ons yet — add optional extras like inside fridge, oven cleaning, blinds, or pet hair treatment.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {addons.map((a, index) => (
+              <div key={a.localId} className="rounded-[12px] border border-line bg-surface-alt/20 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-[0.72rem] font-bold tracking-[0.08em] text-ink-faint uppercase">Add-on {index + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAddon(a.localId)}
+                    className="cursor-pointer rounded-[8px] px-2 py-1 text-[0.78rem] font-semibold text-ink-faint transition-colors hover:bg-[#fdf6f5] hover:text-[#a63d39] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-600"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div className="grid gap-3 min-[641px]:grid-cols-[minmax(0,1fr),140px]">
+                  <input
+                    type="text"
+                    placeholder="Inside fridge"
+                    value={a.name}
+                    onChange={(e) => updateAddon(a.localId, { name: e.target.value })}
+                    className={inputBase}
+                    aria-label="Add-on name"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder="0"
+                    value={a.price_cents ? a.price_cents / 100 : ""}
+                    onChange={(e) => updateAddon(a.localId, { price_cents: dollarsToCents(e.target.value) })}
+                    className={inputBase}
+                    aria-label="Add-on price"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={addAddon}
+          className="mt-3 cursor-pointer text-[0.82rem] font-semibold text-blue-600 transition-colors hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        >
+          + Add an add-on
+        </button>
       </div>
 
       <StepFooter busy={busy} onBack={onBack} />
