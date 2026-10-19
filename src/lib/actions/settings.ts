@@ -107,17 +107,31 @@ export async function saveEmailSettings(
     }
   }
 
+  // Only store an smtp block when there is actually a credential in it.
+  //
+  // This used to write the block unconditionally, including when the provider
+  // was "resend" or "off" — and because the settings form defaults the host to
+  // "smtp.gmail.com", that persisted a server name with a blank password. The
+  // result looked exactly like a configured mail server that had lost its
+  // password, which is alarming and wrong. Leaving the key out entirely means
+  // "this tenant uses the platform sender", unambiguously.
+  const pass = input.password || prevPass;
+  const smtp =
+    input.provider === "smtp" || pass
+      ? {
+          host: input.host.trim(),
+          port: Math.round(input.port) || 587,
+          secure: Boolean(input.secure),
+          user: input.user.trim(),
+          pass, // keeps the existing password when the field is left blank
+          fromName: input.fromName.trim(),
+          fromEmail: input.fromEmail.trim(),
+        }
+      : undefined;
+
   const email = {
     provider: input.provider,
-    smtp: {
-      host: input.host.trim(),
-      port: Math.round(input.port) || 587,
-      secure: Boolean(input.secure),
-      user: input.user.trim(),
-      pass: input.password || prevPass, // keep existing when left blank
-      fromName: input.fromName.trim(),
-      fromEmail: input.fromEmail.trim(),
-    },
+    ...(smtp ? { smtp } : {}),
   };
 
   const { error } = await admin

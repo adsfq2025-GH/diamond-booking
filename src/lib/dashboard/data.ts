@@ -999,6 +999,9 @@ export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
   const smtp = (email?.smtp ?? {}) as Record<string, unknown>;
   return {
     provider: (email?.provider as EmailSettingsView["provider"]) ?? (resendAvailable ? "resend" : "off"),
+    // A placeholder for the form, NOT a stored value. getEmailSettings is a
+    // display shape; what is persisted is decided by saveEmailSettings, which
+    // no longer writes an smtp block without a credential.
     host: (smtp.host as string) || "smtp.gmail.com",
     port: (smtp.port as number) || 587,
     secure: Boolean(smtp.secure),
