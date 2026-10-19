@@ -18,7 +18,15 @@
 >    readable by lower-privileged roles before 0007.
 > 4. **Run `01`, `02` and `03`** against production. They roll back, so they are
 >    safe, and they are the only proof the fixes actually hold where it counts.
-> 5. Apply **`0011_billing_cycle.sql`** when you deploy annual billing.
+>    `01` passed 13/13 and `02` passed 14/14 on 19 October. `03` surfaced a real
+>    runtime bug in `onboarding_readiness()` — see step 5.
+> 5. **Apply `0012_fix_readiness_blockers.sql`, then re-run `03`.** 0009 built
+>    the readiness blockers list with `v_blockers || 'literal'`, which Postgres
+>    resolves to `anyarray || anyarray` and fails on at runtime. Any tenant
+>    missing services, staff, open days, service links or working hours would
+>    have had the readiness check throw instead of listing what was missing.
+>    This is live on production right now.
+> 6. Apply **`0011_billing_cycle.sql`** when you deploy annual billing.
 >
 > Keep the rest of this document for the next environment you set up.
 

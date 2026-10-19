@@ -394,13 +394,13 @@ begin
   select count(*) into v_deposit_services
     from public.services where tenant_id = v_tenant and active and deposit_cents > 0;
 
-  if v_services = 0 then v_blockers := v_blockers || 'no_active_services'; end if;
-  if v_staff = 0 then v_blockers := v_blockers || 'no_active_staff'; end if;
-  if v_open_days = 0 then v_blockers := v_blockers || 'no_open_days'; end if;
-  if v_staff > 0 and v_linked = 0 then v_blockers := v_blockers || 'no_staff_qualified_for_any_service'; end if;
-  if v_staff > 0 and v_with_hours = 0 then v_blockers := v_blockers || 'no_staff_working_hours'; end if;
+  if v_services = 0 then v_blockers := array_append(v_blockers, 'no_active_services'); end if;
+  if v_staff = 0 then v_blockers := array_append(v_blockers, 'no_active_staff'); end if;
+  if v_open_days = 0 then v_blockers := array_append(v_blockers, 'no_open_days'); end if;
+  if v_staff > 0 and v_linked = 0 then v_blockers := array_append(v_blockers, 'no_staff_qualified_for_any_service'); end if;
+  if v_staff > 0 and v_with_hours = 0 then v_blockers := array_append(v_blockers, 'no_staff_working_hours'); end if;
   if v_deposit_services > 0 and v_payments_enabled and not v_charges_enabled then
-    v_blockers := v_blockers || 'deposits_configured_without_stripe_charges';
+    v_blockers := array_append(v_blockers, 'deposits_configured_without_stripe_charges');
   end if;
 
   return jsonb_build_object(
