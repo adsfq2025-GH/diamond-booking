@@ -10,6 +10,7 @@
  * wizard resumes where the owner left off.
  */
 
+import { unstable_rethrow } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth";
 import { tenantPlanContext } from "@/lib/entitlements";
@@ -99,6 +100,7 @@ export async function saveBusinessInfo(
     await mergeSettings(ctx, {}, 2);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("saveBusinessInfo failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -178,6 +180,7 @@ export async function saveServices(
     await mergeSettings(ctx, {}, 3);
     return { ok: true, ids: result.service_ids ?? [] };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("saveServices failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -231,6 +234,7 @@ export async function saveTeam(input: TeamInput): Promise<ActionResult> {
     await mergeSettings(ctx, {}, 4);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("saveTeam failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -272,6 +276,7 @@ export async function saveHours(input: HoursInput): Promise<ActionResult> {
     );
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("saveHours failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -309,6 +314,7 @@ export async function saveBranding(input: BrandingInput): Promise<ActionResult> 
     await mergeSettings(ctx, {}, 6);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("saveBranding failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -437,6 +443,7 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
     await mergeSettings(ctx, { onboarding_complete: true }, 6);
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("finishOnboarding failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -463,6 +470,10 @@ export async function getOnboardingReadiness(): Promise<
       blockers: (r.blockers ?? []).map((b) => READINESS_BLOCKERS[b] ?? b),
     };
   } catch (err) {
+    // redirect()/notFound() and the dynamic-rendering bailout are control flow,
+    // not failures: swallowing them would turn an unauthenticated visit into a
+    // silent "not ready" instead of a redirect to /login.
+    unstable_rethrow(err);
     console.error("getOnboardingReadiness failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
@@ -478,6 +489,7 @@ export async function setOnboardingStep(step: number): Promise<ActionResult> {
     await mergeSettings(ctx, { onboarding_step: clamped });
     return { ok: true };
   } catch (err) {
+    unstable_rethrow(err);
     console.error("setOnboardingStep failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }

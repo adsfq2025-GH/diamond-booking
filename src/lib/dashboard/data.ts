@@ -701,32 +701,111 @@ export const getReportsData = cache(async (): Promise<ReportsData> => {
     getBookingsData(),
     getCustomers(),
   ]);
-  const completed = bookings.bookings.filter((b) => b.status === "completed");
-  const revenueCents = completed.reduce((s, b) => s + b.priceCents, 0);
+  const all = bookings.bookings;
+  const completed = all.filter((b) => b.status === "completed");
+  const earnedCents = completed.reduce((sum, b) => sum + b.priceCents, 0);
+  const bookedCents = all
+    .filter((b) => b.status !== "cancelled")
+    .reduce((sum, b) => sum + b.priceCents, 0);
   const returning = customers.filter((c) => c.bookingsCount > 1).length;
   const newCustomers = customers.filter((c) => c.bookingsCount <= 1).length;
+
+  // Per-employee revenue from the jobs' OWN prices. This was
+  // `jobsThisMonth * 14000` — a hardcoded $140 per job, unrelated to any
+  // booking, presented to the owner as their team's results (A20).
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const revenueByEmployee = new Map<string, number>();
+  const jobsByEmployee = new Map<string, number>();
+  for (const b of completed) {
+    if (!b.employeeName) continue;
+    if (new Date(b.startsAt) < monthStart) continue;
+    revenueByEmployee.set(b.employeeName, (revenueByEmployee.get(b.employeeName) ?? 0) + b.priceCents);
+    jobsByEmployee.set(b.employeeName, (jobsByEmployee.get(b.employeeName) ?? 0) + 1);
+  }
+
+  // Service revenue from the actual bookings of that service, not
+  // count * current list price (which ignored add-ons and discounts).
+  const revenueByService = new Map<string, number>();
+  for (const b of completed) {
+    revenueByService.set(b.serviceName, (revenueByService.get(b.serviceName) ?? 0) + b.priceCents);
+  }
+
+  // A no-show is only meaningful against appointments that were DUE: counting
+  // it over every booking diluted it with future and cancelled ones (A30).
+  const now = Date.now();
+  const due = all.filter(
+    (b) =>
+      new Date(b.startsAt).getTime() <= now &&
+      (b.status === "completed" || b.status === "no_show"),
+  );
+  const noShows = due.filter((b) => b.status === "no_show").length;
+
   return {
-    revenueBars: overview.revenueBars,
-    bookingsBars: overview.revenueBars.map((b) => ({ label: b.label, cents: 0 })),
+    // Collected cash and completed work are different measures; both are shown,
+    // each labelled for what it is.
+    collectedBars: overview.revenueBars,
+    earnedBars: monthlyBars(completed),
     servicePopularity: services
-      .map((s) => ({ name: s.name, count: s.bookingCount, revenueCents: s.bookingCount * s.priceCents }))
+      .map((s) => ({
+        name: s.name,
+        count: s.bookingCount,
+        revenueCents: revenueByService.get(s.name) ?? 0,
+      }))
       .sort((a, b) => b.count - a.count),
     employeePerformance: team
       .filter((e) => e.active)
-      .map((e) => ({ name: e.name, color: e.color, jobs: e.jobsThisMonth, revenueCents: e.jobsThisMonth * 14000, utilization: e.utilization })),
+      .map((e) => ({
+        name: e.name,
+        color: e.color,
+        jobs: jobsByEmployee.get(e.name) ?? 0,
+        revenueCents: revenueByEmployee.get(e.name) ?? 0,
+        utilization: e.utilization,
+      })),
     retention: {
       returning,
       newCustomers,
       repeatRate: customers.length ? returning / customers.length : 0,
     },
     totals: {
-      revenueCents,
+      bookedCents,
+      earnedCents,
+      collectedCents: overview.revenueTotalCents,
       bookings: bookings.counts.all,
-      avgTicketCents: completed.length ? Math.round(revenueCents / completed.length) : 0,
-      noShowRate: bookings.counts.all ? bookings.counts.no_show / bookings.counts.all : 0,
+      avgTicketCents: completed.length ? Math.round(earnedCents / completed.length) : 0,
+      noShowRate: due.length ? noShows / due.length : 0,
+      noShowDenominator: due.length,
     },
   };
 });
+
+/**
+ * Monthly totals over the same 8-month window the overview chart uses, so the
+ * two charts line up. The "bookings volume" chart was previously built by
+ * mapping every bar to `cents: 0` — a permanently empty chart.
+ */
+function monthlyBars(
+  rows: Array<{ startsAt: string; priceCents: number }>,
+): Array<{ label: string; cents: number }> {
+  const bars: Array<{ label: string; cents: number; key: string }> = [];
+  const now = new Date();
+  for (let i = 7; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    bars.push({
+      label: d.toLocaleDateString("en-US", { month: "short" }),
+      cents: 0,
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+    });
+  }
+  const index = new Map(bars.map((b, i) => [b.key, i]));
+  for (const row of rows) {
+    const d = new Date(row.startsAt);
+    const i = index.get(`${d.getFullYear()}-${d.getMonth()}`);
+    if (i !== undefined) bars[i].cents += row.priceCents;
+  }
+  return bars.map(({ label, cents }) => ({ label, cents }));
+}
 
 export const getCoupons = cache(async (): Promise<CouponView[]> => {
   if (!supabaseEnvConfigured()) {
@@ -760,11 +839,19 @@ export const getWidgetData = cache(async (): Promise<WidgetData> => {
     throw new Error("Widget dashboard requires a tenant-scoped authenticated user.");
   }
   const { supabase, tenantId } = scope;
-  const { data } = await supabase
-    .from("widget_configs")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
+  // The preview shows THIS tenant's published config, not a hardcoded demo
+  // business (A23) — so load the name and the live service list with it.
+  const [{ data }, { data: tenant }, { data: services }] = await Promise.all([
+    supabase.from("widget_configs").select("*").eq("tenant_id", tenantId).maybeSingle(),
+    supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle(),
+    supabase
+      .from("services")
+      .select("id, name, price_cents, duration_minutes")
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .order("sort")
+      .limit(4),
+  ]);
   if (!data) {
     throw new Error(`Widget configuration is missing for tenant ${tenantId}.`);
   }
@@ -780,6 +867,13 @@ export const getWidgetData = cache(async (): Promise<WidgetData> => {
     allowedDomains: domains,
     customFields: fields,
     appUrl,
+    businessName: tenant?.name ?? "Your business",
+    previewServices: (services ?? []).map((svc) => ({
+      id: svc.id,
+      name: svc.name,
+      priceCents: svc.price_cents,
+      durationMinutes: svc.duration_minutes,
+    })),
   };
 });
 

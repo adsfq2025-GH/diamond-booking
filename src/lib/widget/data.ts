@@ -339,6 +339,62 @@ export async function createBookingInquiry(input: {
   return { ok: true };
 }
 
+/**
+ * Is this widget allowed to be embedded on `referer`'s origin? (A26)
+ *
+ * widget_configs.allowed_domains was collected, stored and listed back to the
+ * owner under "Where the widget may be embedded" — and never read by anything.
+ * Neither the booking page nor any of the RPCs consulted it, so the widget
+ * could be embedded on any site by anyone holding the public key. The control
+ * was a placebo that owners would reasonably trust.
+ *
+ * An empty list still means "anywhere", which is the sensible default and what
+ * every existing tenant has. A referer is only present on cross-origin embeds,
+ * and it is a hint, not proof — so this governs EMBEDDING, never authorization:
+ * the hosted /book page and the RPCs behind it remain reachable directly, as
+ * they must be for a customer following a link.
+ */
+export async function embedAllowedForKey(
+  publicKey: string,
+  referer: string | null,
+): Promise<{ allowed: true } | { allowed: false; domains: string[] }> {
+  if (!supabaseEnvConfigured()) return { allowed: true };
+  if (!referer) return { allowed: true }; // direct visit, not an embed
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { allowed: true }; // cannot check: do not break the booking page
+  }
+
+  const { data } = await admin
+    .from("widget_configs")
+    .select("allowed_domains")
+    .eq("public_key", publicKey)
+    .maybeSingle();
+
+  const domains = (data?.allowed_domains ?? []).filter(Boolean);
+  if (domains.length === 0) return { allowed: true };
+
+  let host: string;
+  try {
+    host = new URL(referer).hostname.toLowerCase();
+  } catch {
+    return { allowed: true };
+  }
+
+  const ok = domains.some((entry) => {
+    const d = entry.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    if (!d) return false;
+    // "example.com" also covers its subdomains; "www.example.com" does not
+    // cover "example.com".
+    return host === d || host.endsWith(`.${d}`);
+  });
+
+  return ok ? { allowed: true } : { allowed: false, domains };
+}
+
 export interface CreateBookingInput {
   publicKey: string;
   serviceId: string;

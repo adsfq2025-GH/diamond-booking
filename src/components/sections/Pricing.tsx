@@ -4,7 +4,20 @@ import { SectionHeading, Em } from "@/components/ui/SectionHeading";
 import { Reveal } from "@/components/motion/Reveal";
 import { Stagger, StaggerItem } from "@/components/motion/Stagger";
 import { cn } from "@/lib/cn";
+import { PLANS, PLAN_ORDER } from "@/lib/plans";
 
+/**
+ * Plans are DERIVED from the typed catalog in lib/plans.ts (A24).
+ *
+ * They used to be hardcoded here, which is how the marketing page came to
+ * advertise an "Enterprise" tier at $119 while the product's plan_tier enum
+ * has no such value — a customer bought Enterprise and was provisioned elite.
+ * The feature bullets had drifted too, promising two-way texting, card-on-file
+ * payments and a dedicated success manager that no plan grants.
+ *
+ * Changing a price or a limit now means changing the catalog, and every
+ * surface — marketing, signup, billing, server entitlements — follows.
+ */
 type Plan = {
   name: string;
   price: string;
@@ -13,43 +26,17 @@ type Plan = {
   popular?: boolean;
 };
 
-const plans: Plan[] = [
-  {
-    name: "Starter",
-    price: "$29",
-    desc: "For solo operators and new businesses taking their first online bookings.",
-    features: [
-      "Unlimited online bookings",
-      "Embeddable booking widget",
-      "Email confirmations & reminders",
-      "1 staff calendar",
-    ],
-  },
-  {
-    name: "Professional",
-    price: "$59",
-    desc: "For growing teams that live by the schedule — the plan most of our 3,000+ businesses run on.",
-    popular: true,
-    features: [
-      "Everything in Starter",
-      "SMS reminders & two-way texting",
-      "Up to 10 staff calendars & dispatch",
-      "Deposits & card-on-file payments",
-      "Revenue analytics",
-    ],
-  },
-  {
-    name: "Enterprise",
-    price: "$119",
-    desc: "For multi-crew and multi-location operations that need control at scale.",
-    features: [
-      "Everything in Professional",
-      "Unlimited staff & locations",
-      "API access & custom integrations",
-      "Dedicated success manager",
-    ],
-  },
-];
+const plans: Plan[] = PLAN_ORDER.map((tier) => {
+  const plan = PLANS[tier];
+  return {
+    name: plan.name,
+    price: `$${plan.priceMonthly}`,
+    desc: plan.description,
+    features: plan.highlights,
+    // The middle tier is the one we recommend.
+    popular: tier === "professional",
+  };
+});
 
 function Check({ gold = false }: { gold?: boolean }) {
   return (

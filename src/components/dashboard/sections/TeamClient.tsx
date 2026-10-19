@@ -16,10 +16,13 @@ import { Label, inputBase } from "@/components/ui/Field";
 export function TeamClient({
   initial,
   pending,
+  readiness,
 }: {
   initial: EmployeeView[];
   /** Live invitations keyed by employee id, so "Invited" means something. */
   pending: Record<string, { email: string; expiresAt: string }>;
+  /** Server-computed capacity gaps, or null when they could not be read. */
+  readiness: { bookingReady: boolean; blockers: string[] } | null;
 }) {
   const [selected, setSelected] = useState<EmployeeView | null>(null);
   const [inviting, setInviting] = useState(false);
@@ -45,6 +48,32 @@ export function TeamClient({
           {active} active · {initial.length} total
         </span>
       </Toolbar>
+
+      {/*
+        Capacity diagnostics (A35). Availability lives on employee rows the
+        owner cannot edit, and before invitations worked no teammate could sign
+        in to set their own — so an owner whose widget stopped offering slots
+        had no way to find out why. These are the concrete gaps, named.
+      */}
+      {readiness && readiness.blockers.length > 0 && (
+        <div className="mb-4 rounded-[12px] border border-gold-300 bg-gold-50 px-4 py-4">
+          <p className="text-[0.85rem] font-semibold text-ink">
+            {readiness.bookingReady
+              ? "Your booking page is live, but there are gaps"
+              : "Your booking page cannot offer any times yet"}
+          </p>
+          <ul className="mt-2 space-y-1 text-[0.82rem] text-ink-muted">
+            {readiness.blockers.map((blocker) => (
+              <li key={blocker} className="flex gap-2">
+                <span aria-hidden className="text-gold-700">
+                  •
+                </span>
+                <span>{blocker}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {notice && (
         <div

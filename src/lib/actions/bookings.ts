@@ -243,10 +243,36 @@ export async function cancelMyBooking(
 
   const { data: bk } = await admin
     .from("bookings")
-    .select("id, customer_id, recurrence_group_id")
+    .select("id, customer_id, recurrence_group_id, starts_at, tenant_id")
     .eq("id", bookingId)
     .maybeSingle();
   if (!bk || !custIds.includes(bk.customer_id)) return { ok: false, error: "Booking not found." };
+
+  // Enforce the business's cancellation window (A29). Onboarding collected
+  // cancellation_window_hours and displayed the policy as if it bound the
+  // customer, but nothing ever read it: a booking could be cancelled minutes
+  // before the appointment whatever the owner had configured.
+  const { data: tenantRow } = await admin
+    .from("tenants")
+    .select("settings")
+    .eq("id", bk.tenant_id)
+    .maybeSingle();
+  const windowHours = Number(
+    ((tenantRow?.settings ?? {}) as { cancellation_window_hours?: number })
+      .cancellation_window_hours ?? 0,
+  );
+  if (windowHours > 0) {
+    const hoursUntil = (new Date(bk.starts_at).getTime() - Date.now()) / (60 * 60 * 1000);
+    if (hoursUntil < windowHours) {
+      return {
+        ok: false,
+        error:
+          hoursUntil <= 0
+            ? "This appointment has already started — please contact the business directly."
+            : `This business asks for ${windowHours} hours' notice to cancel online. Please contact them directly.`,
+      };
+    }
+  }
 
   if (bk.recurrence_group_id) {
     await admin

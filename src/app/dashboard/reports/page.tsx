@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { money, moneyCompact, percent } from "@/lib/format";
 import { getReportsData } from "@/lib/dashboard/data";
-import { BarChart, DonutRatio, RevenueBarChart } from "@/components/dashboard/charts";
+import { DonutRatio, RevenueBarChart } from "@/components/dashboard/charts";
 import { Panel, PanelHeader, StatCard, Meter } from "@/components/dashboard/ui";
 
 export const metadata: Metadata = { title: "Reports" };
@@ -12,38 +12,63 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-6">
+      {/*
+        Four named figures instead of one ambiguous "revenue". The overview
+        summed collected payments while this page summed completed bookings'
+        prices, and both were labelled revenue (A30).
+      */}
       <div className="grid grid-cols-1 gap-4 min-[521px]:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Revenue (completed)" value={money(r.totals.revenueCents)} caption="all bookings" />
-        <StatCard label="Total bookings" value={String(r.totals.bookings)} caption="all statuses" />
-        <StatCard label="Average ticket" value={money(r.totals.avgTicketCents)} caption="per completed job" />
+        <StatCard
+          label="Booked"
+          value={money(r.totals.bookedCents)}
+          caption="value of non-cancelled bookings"
+        />
+        <StatCard
+          label="Earned"
+          value={money(r.totals.earnedCents)}
+          caption="work marked completed"
+        />
+        <StatCard
+          label="Collected"
+          value={money(r.totals.collectedCents)}
+          caption="cash recorded against payments"
+        />
         <StatCard
           label="No-show rate"
-          value={percent(r.totals.noShowRate, 1)}
-          caption="of all bookings"
-          delta={r.totals.noShowRate}
+          value={
+            r.totals.noShowDenominator === 0 ? "—" : percent(r.totals.noShowRate, 1)
+          }
+          caption={
+            r.totals.noShowDenominator === 0
+              ? "no appointments due yet"
+              : `of ${r.totals.noShowDenominator} appointments due`
+          }
+          delta={r.totals.noShowDenominator === 0 ? undefined : r.totals.noShowRate}
           invertDelta
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 min-[521px]:grid-cols-2">
+        <StatCard label="Total bookings" value={String(r.totals.bookings)} caption="all statuses" />
+        <StatCard
+          label="Average ticket"
+          value={money(r.totals.avgTicketCents)}
+          caption="per completed job"
         />
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Panel>
-          <PanelHeader title="Revenue trend" caption="Last 8 months" />
+          <PanelHeader title="Cash collected" caption="Payments recorded, last 8 months" />
           <div className="px-5 py-5">
-            <RevenueBarChart bars={r.revenueBars} height={188} />
+            <RevenueBarChart bars={r.collectedBars} height={188} />
           </div>
         </Panel>
         <Panel>
-          <PanelHeader title="Bookings volume" caption="Last 8 months" />
+          <PanelHeader title="Work completed" caption="Value of completed jobs, last 8 months" />
           <div className="px-5 py-5">
-            <BarChart
-              height={188}
-              bars={r.bookingsBars.map((b) => ({
-                label: b.label,
-                value: b.cents,
-                display: String(b.cents),
-                color: "var(--navy-400)",
-              }))}
-            />
+            {/* This chart used to be built by mapping every bar to cents: 0. */}
+            <RevenueBarChart bars={r.earnedBars} height={188} />
           </div>
         </Panel>
       </div>

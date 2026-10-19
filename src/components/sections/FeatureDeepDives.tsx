@@ -4,6 +4,9 @@ import { Em } from "@/components/ui/SectionHeading";
 import { Reveal } from "@/components/motion/Reveal";
 import { cn } from "@/lib/cn";
 
+/** The real loader origin, so the marketing sample matches what we ship. */
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://diamond-booking.com";
+
 /* ------------------------------------------------------------------ */
 /*  Shared bits                                                        */
 /* ------------------------------------------------------------------ */
@@ -543,11 +546,21 @@ function WidgetMock() {
             {"\n  "}
             <span className="text-gold-300">src</span>
             <span className="text-white/60">=</span>
-            <span className="text-success-500">&quot;//embed.diamondbooking.com/v1.js&quot;</span>
+            {/*
+              This illustrated //embed.diamondbooking.com/v1.js with a business
+              slug — a loader that does not exist. The real snippet is the one
+              the dashboard and the onboarding reveal generate, and it is what
+              public/embed.js actually implements (A25).
+            */}
+            <span className="text-success-500">
+              &quot;{APP_URL}/embed.js&quot;
+            </span>
             {"\n  "}
-            <span className="text-gold-300">data-business</span>
+            <span className="text-gold-300">data-key</span>
             <span className="text-white/60">=</span>
-            <span className="text-success-500">&quot;clean-sweep&quot;</span>
+            <span className="text-success-500">&quot;YOUR_WIDGET_KEY&quot;</span>
+            {"\n  "}
+            <span className="text-gold-300">async</span>
             {"\n"}
             <span className="text-blue-300">{"></script>"}</span>
           </code>

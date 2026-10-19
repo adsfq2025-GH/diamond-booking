@@ -244,18 +244,41 @@ export interface PaymentsData {
 
 // ---------- Reports ----------
 export interface ReportsData {
-  revenueBars: RevenueBar[];
-  bookingsBars: RevenueBar[];
+  /** Cash actually collected, per month (payments). */
+  collectedBars: RevenueBar[];
+  /** Value of work completed, per month (bookings). Not the same thing. */
+  earnedBars: RevenueBar[];
   servicePopularity: Array<{ name: string; count: number; revenueCents: number }>;
   employeePerformance: Array<{
     name: string;
     color: string;
     jobs: number;
+    /** Sum of the jobs' own prices. Null when none are priced yet. */
     revenueCents: number;
     utilization: number;
   }>;
   retention: { returning: number; newCustomers: number; repeatRate: number };
-  totals: { revenueCents: number; bookings: number; avgTicketCents: number; noShowRate: number };
+  /**
+   * Four distinct figures, deliberately named. The dashboard used to label two
+   * different definitions "revenue": the overview summed collected payments,
+   * the reports page summed completed bookings' prices (A30).
+   */
+  totals: {
+    /** Value of every non-cancelled booking in the period. */
+    bookedCents: number;
+    /** Value of bookings marked completed. */
+    earnedCents: number;
+    /** Cash recorded against payments. */
+    collectedCents: number;
+    bookings: number;
+    avgTicketCents: number;
+    /**
+     * No-shows over appointments that were DUE in the period — not over all
+     * bookings, which diluted it with future and cancelled ones.
+     */
+    noShowRate: number;
+    noShowDenominator: number;
+  };
 }
 
 // ---------- Marketing ----------
@@ -280,4 +303,13 @@ export interface WidgetData {
   allowedDomains: string[];
   customFields: Array<{ key: string; label: string; type: string; required: boolean }>;
   appUrl: string;
+  /** This tenant's own name, for the preview header. */
+  businessName: string;
+  /** This tenant's own published services, for the preview list. */
+  previewServices: Array<{
+    id: string;
+    name: string;
+    priceCents: number;
+    durationMinutes: number;
+  }>;
 }

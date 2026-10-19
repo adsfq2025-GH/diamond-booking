@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import type { WidgetData } from "@/lib/dashboard/types";
 import { saveWidgetSettings } from "@/lib/actions/settings";
+import { money } from "@/lib/format";
 import { Icon } from "../icons";
 import { Panel, PanelHeader } from "../ui";
 import { inputBase, Label } from "@/components/ui/Field";
@@ -246,7 +247,10 @@ export function WidgetClient({
           </Panel>
 
           <Panel>
-            <PanelHeader title="Allowed domains" caption="Where the widget may be embedded" />
+            <PanelHeader
+              title="Allowed domains"
+              caption="Leave empty to allow any website. Listed domains cover their subdomains too."
+            />
             <div className="px-5 py-5">
               <div className="flex flex-wrap gap-2">
                 {allowedDomains.length === 0 ? (
@@ -284,9 +288,18 @@ export function WidgetClient({
         <div className="lg:col-span-2">
           <div className="lg:sticky lg:top-[76px]">
             <p className="mb-3 text-[0.7rem] font-bold tracking-[0.16em] text-ink-faint uppercase">
-              Live preview
+              Appearance preview
             </p>
-            <WidgetPreview color={color} radius={radius} />
+            <WidgetPreview
+              color={color}
+              radius={radius}
+              businessName={data.businessName}
+              services={data.previewServices}
+            />
+            <p className="mt-3 text-center text-[0.72rem] leading-[1.5] text-ink-faint">
+              Your published services with your unsaved branding applied. Open
+              the booking link above to see the real thing.
+            </p>
           </div>
         </div>
       </div>
@@ -294,13 +307,36 @@ export function WidgetClient({
   );
 }
 
-/** A faithful static mock of the embeddable widget that reflects the controls. */
-function WidgetPreview({ color, radius }: { color: string; radius: number }) {
-  const services = [
-    { name: "Standard Home Cleaning", price: "$120", dur: "2h", on: true },
-    { name: "Deep Cleaning", price: "$240", dur: "4h", on: false },
-    { name: "Office Cleaning", price: "$150", dur: "1h 30m", on: false },
-  ];
+/**
+ * Preview of the embeddable widget (A23).
+ *
+ * It renders THIS tenant's published name and services with the unsaved
+ * branding applied on top. It used to be a hardcoded mock — "Clean Sweep
+ * Services" offering Standard Home Cleaning, Deep Cleaning and Office Cleaning
+ * — labelled "Live preview", which is exactly why the preview and the hosted
+ * page disagreed on business name, services and durations.
+ *
+ * It is still a rendering of the first step, not the real booking component,
+ * so it is labelled a preview of appearance rather than a live booking flow,
+ * and the hosted link beside it is the real thing.
+ */
+function WidgetPreview({
+  color,
+  radius,
+  businessName,
+  services: tenantServices,
+}: {
+  color: string;
+  radius: number;
+  businessName: string;
+  services: Array<{ id: string; name: string; priceCents: number; durationMinutes: number }>;
+}) {
+  const services = tenantServices.map((svc, i) => ({
+    name: svc.name,
+    price: money(svc.priceCents),
+    dur: formatDuration(svc.durationMinutes),
+    on: i === 0,
+  }));
   return (
     <div
       className="mx-auto max-w-[360px] overflow-hidden border border-line bg-card shadow-float"
@@ -308,10 +344,19 @@ function WidgetPreview({ color, radius }: { color: string; radius: number }) {
     >
       <div className="px-5 py-4 text-white" style={{ backgroundColor: color }}>
         <p className="text-[0.72rem] font-semibold tracking-wide opacity-80 uppercase">Book online</p>
-        <p className="font-display text-[1.15rem] font-semibold">Clean Sweep Services</p>
+        <p className="font-display text-[1.15rem] font-semibold">{businessName}</p>
       </div>
       <div className="space-y-2.5 px-5 py-5">
         <p className="text-[0.75rem] font-semibold text-ink-faint">1. Choose a service</p>
+        {services.length === 0 && (
+          <p
+            className="border border-dashed px-3.5 py-5 text-center text-[0.78rem] text-ink-faint"
+            style={{ borderRadius: radius }}
+          >
+            No active services yet — add one and it will appear here and on your
+            booking page.
+          </p>
+        )}
         {services.map((s) => (
           <div
             key={s.name}
@@ -343,4 +388,12 @@ function WidgetPreview({ color, radius }: { color: string; radius: number }) {
       </div>
     </div>
   );
+}
+
+/** "2h 30m" from minutes, matching the booking page's own formatting. */
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }

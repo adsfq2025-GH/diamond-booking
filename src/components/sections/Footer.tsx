@@ -26,7 +26,10 @@ const columns: { heading: string; links: { label: string; href: string }[] }[] =
     links: [
       { label: "About", href: "/about" },
       { label: "Support", href: "/contact" },
-      { label: "API docs", href: "/features" },
+      // "API docs" used to point here at /features, a marketing page. There is
+      // no public API documentation to link to, so it is not advertised (A31).
+      { label: "Privacy policy", href: "/privacy" },
+      { label: "Terms of service", href: "/terms" },
       { label: "Contact sales", href: "/contact" },
     ],
   },
@@ -67,7 +70,19 @@ export function Footer() {
         </div>
         <div className="flex flex-wrap justify-between gap-4 border-t border-white/10 pt-7 text-[0.78rem] text-white/40">
           <span>© 2026 Diamond Booking. All rights reserved.</span>
-          <span>Privacy · Terms · Security</span>
+          {/*
+            These were plain text, not links — /privacy and /terms existed and
+            built, but the marketing footer never linked them, and "Security"
+            had no page at all (A31).
+          */}
+          <span className="flex gap-3">
+            <Link href="/privacy" className="transition-colors hover:text-white/70">
+              Privacy
+            </Link>
+            <Link href="/terms" className="transition-colors hover:text-white/70">
+              Terms
+            </Link>
+          </span>
         </div>
       </Container>
     </footer>

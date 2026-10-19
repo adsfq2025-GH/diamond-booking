@@ -146,8 +146,8 @@ export default async function OverviewPage() {
         <div className="space-y-5 lg:col-span-2">
           <Panel>
             <PanelHeader
-              title="Revenue"
-              caption="Collected payments, last 8 months"
+              title="Cash collected"
+              caption="Payments recorded, last 8 months — not the value of work completed"
               action={
                 <span className="font-instrument text-[1.15rem] font-semibold text-ink">
                   {money(data.revenueTotalCents)}
