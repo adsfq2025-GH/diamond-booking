@@ -3,12 +3,26 @@
 Three SQL files that prove the October 2026 audit fixes work **on a specific
 database**, rather than only in the diff.
 
-Each file:
+`01`, `02` and `03` are each **a single `DO` block — run the whole file as one
+statement.** Each one:
 
-- builds its own throwaway fixture (prefixed `ztest-`),
-- asserts, raising an exception with a `FAIL <id>` message on the first problem,
-- prints a `PASS <id>` notice for every check that holds,
-- ends with `ROLLBACK`, so it persists nothing and is safe to re-run.
+- builds its own throwaway fixture with fixed `ztest-` ids,
+- asserts, raising `FAIL <id>` on the first problem,
+- prints `PASS <id>` for every check that holds,
+- ends by raising **`ZTEST COMPLETE — all N checks passed`**, which IS the
+  rollback: a statement that raises is rolled back in full, so nothing is ever
+  persisted. That final error is the success signal, not a failure.
+
+> **Why one statement.** These used to keep fixture ids in a temp table inside a
+> `begin; ... rollback;` wrapper. The Supabase SQL editor does not keep separate
+> statements in one session, so the temp table vanished (`relation "_ids" does
+> not exist`) — and worse, the explicit transaction was not reliably wrapping
+> anything, so a partial run could have COMMITTED fixture rows into the
+> database. One statement is atomic by construction, whatever the client does.
+
+Each file also has a pre-flight check that refuses to run if its fixture already
+exists, which would mean an earlier run committed; the cleanup query is at the
+bottom of the file.
 
 | File | Findings covered |
 |---|---|
