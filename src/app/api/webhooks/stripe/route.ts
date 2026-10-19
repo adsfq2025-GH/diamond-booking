@@ -130,20 +130,101 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
     case "payment_intent.payment_failed": {
       const intent = event.data.object as Stripe.PaymentIntent;
       const tenantId = intent.metadata?.tenant_id;
-      const bookingId = intent.metadata?.booking_id;
-      if (!tenantId || !bookingId) break;
-      const admin = createAdminClient();
-      await admin.from("payments").upsert(
+      const bookingId = intent.metadata?.booking_id ?? null;
+      const invoiceId = intent.metadata?.invoice_id ?? null;
+      if (!tenantId) break;
+
+      const succeeded = event.type === "payment_intent.succeeded";
+
+      // Idempotent on stripe_payment_intent_id — which needs the unique index
+      // added in 0007_security.sql. Without it this statement could not run at
+      // all, so no payment was ever recorded and Stripe retried forever (A07).
+      const { error: payErr } = await admin.from("payments").upsert(
         {
           tenant_id: tenantId,
           booking_id: bookingId,
+          invoice_id: invoiceId,
+          customer_id: intent.metadata?.customer_id ?? null,
           stripe_payment_intent_id: intent.id,
-          amount_cents: intent.amount,
-          status: event.type === "payment_intent.succeeded" ? "succeeded" : "failed",
+          amount_cents: intent.amount_received || intent.amount,
+          status: succeeded ? "succeeded" : "failed",
           kind: intent.metadata?.kind ?? "payment",
         },
         { onConflict: "stripe_payment_intent_id" },
       );
+      if (payErr) throw payErr;   // 500 → Stripe retries, rather than losing it
+
+      if (!succeeded) break;
+
+      // Reconcile what the money was FOR. Recording the ledger row alone left
+      // the booking and the invoice looking unpaid.
+      if (invoiceId) {
+        const { data: invoice } = await admin
+          .from("invoices")
+          .select("total_cents, paid_cents")
+          .eq("id", invoiceId)
+          .eq("tenant_id", tenantId)
+          .maybeSingle();
+        if (invoice) {
+          const paid = (invoice.paid_cents ?? 0) + (intent.amount_received || intent.amount);
+          await admin
+            .from("invoices")
+            .update({
+              paid_cents: paid,
+              status: paid >= (invoice.total_cents ?? 0) ? "paid" : "partially_paid",
+            })
+            .eq("id", invoiceId)
+            .eq("tenant_id", tenantId);
+        }
+      }
+
+      // A paid deposit is the business's own signal to confirm the job.
+      if (bookingId && (intent.metadata?.kind ?? "payment") === "deposit") {
+        await admin
+          .from("bookings")
+          .update({ status: "confirmed" })
+          .eq("id", bookingId)
+          .eq("tenant_id", tenantId)
+          .eq("status", "pending");
+      }
+      break;
+    }
+
+    case "charge.refunded": {
+      const charge = event.data.object as Stripe.Charge;
+      const intentId =
+        typeof charge.payment_intent === "string" ? charge.payment_intent : null;
+      if (!intentId) break;
+
+      // Find the original payment so the refund lands on the right tenant.
+      const { data: original } = await admin
+        .from("payments")
+        .select("tenant_id, booking_id, invoice_id, customer_id")
+        .eq("stripe_payment_intent_id", intentId)
+        .maybeSingle();
+      if (!original) break;
+
+      await admin.from("payments").upsert(
+        {
+          tenant_id: original.tenant_id,
+          booking_id: original.booking_id,
+          invoice_id: original.invoice_id,
+          customer_id: original.customer_id,
+          stripe_payment_intent_id: `${intentId}:refund:${charge.id}`,
+          amount_cents: -(charge.amount_refunded ?? 0),
+          status: "refunded",
+          kind: "refund",
+        },
+        { onConflict: "stripe_payment_intent_id" },
+      );
+
+      if (original.invoice_id) {
+        await admin
+          .from("invoices")
+          .update({ status: charge.refunded ? "refunded" : "partially_paid" })
+          .eq("id", original.invoice_id)
+          .eq("tenant_id", original.tenant_id);
+      }
       break;
     }
 
@@ -152,7 +233,14 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
   }
 }
 
-/** Map Stripe subscription status → our SubscriptionStatus enum. */
+/**
+ * Map Stripe subscription status → our SubscriptionStatus enum.
+ *
+ * Unknown statuses map to past_due (restricted), NOT active. The default used
+ * to be "active", so `incomplete` — a subscription whose first payment never
+ * completed — and `paused` both read as a paying subscriber, and so would any
+ * status Stripe adds later (A33).
+ */
 function mapStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
   switch (status) {
     case "trialing":
@@ -161,11 +249,14 @@ function mapStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
       return "active";
     case "past_due":
     case "unpaid":
+    case "incomplete":
+    case "paused":
       return "past_due";
     case "canceled":
     case "incomplete_expired":
       return "canceled";
     default:
-      return "active";
+      console.warn("[stripe webhook] unmapped subscription status, restricting:", status);
+      return "past_due";
   }
 }

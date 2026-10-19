@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
+import { canAddService, tenantPlanContext } from "@/lib/entitlements";
 import type { TablesInsert } from "@/types/domain";
 
 export interface ServiceAddonDraft {
@@ -56,6 +57,16 @@ export async function saveService(input: ServiceDraft): Promise<Result> {
 
   const name = input.name.trim();
   if (!name) return { ok: false, error: "The service needs a name." };
+
+  // Plan limit, enforced here rather than only in the UI (A19). Only a NEW
+  // service consumes a slot; editing an existing one never does.
+  if (!input.id) {
+    const planCtx = await tenantPlanContext();
+    if (planCtx) {
+      const allowed = await canAddService(planCtx);
+      if (!allowed.ok) return { ok: false, error: allowed.error };
+    }
+  }
 
   const fields = {
     tenant_id: tenantId,

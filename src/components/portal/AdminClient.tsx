@@ -67,14 +67,27 @@ export interface PlatformEmail {
   detail: string;
 }
 
+export interface PlatformHealth {
+  remindersPending: number;
+  remindersFailed: number;
+  paymentsLast7d: number;
+  jobs: Array<{ path: string; detail: string; healthy: boolean }>;
+}
+
 export function AdminClient({
   data,
   platformEmail,
   initialTab,
+  health,
+  configProblems,
 }: {
   data: AdminData;
   platformEmail?: PlatformEmail;
   initialTab?: string;
+  /** Counted from the database, not invented. */
+  health: PlatformHealth;
+  /** Environment gaps that silently break features. */
+  configProblems: Array<{ severity: "blocker" | "warning"; area: string; message: string }>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -622,29 +635,90 @@ export function AdminClient({
         </div>
       )}
 
+      {/*
+        Real numbers only. This tab used to show hardcoded figures — "Webhook
+        success 99.2%", "Queue backlog 14", plus three invented incident notes
+        — on the platform owner's own console. Everything here is now counted
+        from the database or read from the environment.
+      */}
       {tab === "health" && (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 min-[521px]:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Webhook success" value="99.2%" caption="last 7 days" />
-            <StatCard label="Queue backlog" value="14" caption="jobs waiting" />
-            <StatCard label="Email delivery" value="98.7%" caption="platform average" />
-            <StatCard label="Auth failures" value="1.4%" invertDelta delta={0.012} caption="sign-in attempts" />
+            <StatCard
+              label="Reminders due"
+              value={String(health.remindersPending)}
+              caption="queued and past due"
+            />
+            <StatCard
+              label="Reminders failed"
+              value={String(health.remindersFailed)}
+              caption="last 7 days"
+            />
+            <StatCard
+              label="Payments recorded"
+              value={String(health.paymentsLast7d)}
+              caption="last 7 days"
+            />
+            <StatCard
+              label="Config problems"
+              value={String(configProblems.length)}
+              caption={
+                configProblems.some((p) => p.severity === "blocker")
+                  ? "including blockers"
+                  : "warnings only"
+              }
+            />
           </div>
+
           <Panel>
-            <PanelHeader title="Platform health notes" caption="Operational visibility" />
+            <PanelHeader
+              title="Configuration"
+              caption="Environment variables this deployment actually reads"
+            />
+            {configProblems.length === 0 ? (
+              <div className="px-5 py-6 text-[0.82rem] text-ink-muted">
+                Everything the app needs is configured.
+              </div>
+            ) : (
+              <ul className="divide-y divide-line px-5">
+                {configProblems.map((problem, i) => (
+                  <li key={i} className="flex items-start justify-between gap-3 py-4 text-[0.82rem]">
+                    <span className="text-ink">
+                      <span className="font-semibold">{problem.area}:</span> {problem.message}
+                    </span>
+                    <span
+                      className={pillClassName(
+                        problem.severity === "blocker"
+                          ? "bg-[#fbeaea] text-[#a63d39]"
+                          : "bg-gold-100 text-gold-700",
+                      )}
+                    >
+                      {problem.severity}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel>
+            <PanelHeader title="Scheduled jobs" caption="From vercel.json and the environment" />
             <ul className="divide-y divide-line px-5">
-              <li className="flex items-center justify-between gap-3 py-4 text-[0.82rem]">
-                <span className="text-ink">Stripe webhooks are processing normally.</span>
-                <span className={pillClassName("bg-success-50 text-success-700")}>healthy</span>
-              </li>
-              <li className="flex items-center justify-between gap-3 py-4 text-[0.82rem]">
-                <span className="text-ink">Reminder queue is slightly elevated after weekend spike.</span>
-                <span className={pillClassName("bg-gold-100 text-gold-700")}>watch</span>
-              </li>
-              <li className="flex items-center justify-between gap-3 py-4 text-[0.82rem]">
-                <span className="text-ink">No active incidents affecting booking creation.</span>
-                <span className={pillClassName("bg-success-50 text-success-700")}>clear</span>
-              </li>
+              {health.jobs.map((job) => (
+                <li key={job.path} className="flex items-start justify-between gap-3 py-4 text-[0.82rem]">
+                  <span className="text-ink">
+                    <span className="font-semibold">{job.path}</span>
+                    <span className="block text-ink-faint">{job.detail}</span>
+                  </span>
+                  <span
+                    className={pillClassName(
+                      job.healthy ? "bg-success-50 text-success-700" : "bg-[#fbeaea] text-[#a63d39]",
+                    )}
+                  >
+                    {job.healthy ? "scheduled" : "not running"}
+                  </span>
+                </li>
+              ))}
             </ul>
           </Panel>
         </div>

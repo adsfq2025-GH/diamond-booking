@@ -1,5 +1,6 @@
 import type { Json } from "@/types/database";
 import { createAdminClient } from "@/lib/supabase/server";
+import { supabaseEnvConfigured } from "@/lib/env";
 import type { LaunchReadiness } from "@/lib/onboarding/types";
 
 export interface AdminTenant {
@@ -417,4 +418,71 @@ function describeAuditDetail(action: string, meta: Record<string, unknown>) {
 export async function getAdminTenantById(tenantId: string) {
   const data = await getAdminData();
   return data.tenants.find((tenant) => tenant.id === tenantId) ?? null;
+}
+
+/**
+ * Real platform health, counted from the database. The admin console's
+ * "System health" tab used to show hardcoded percentages and three invented
+ * incident notes; these are the numbers behind what it shows now.
+ */
+export async function getPlatformHealth(): Promise<{
+  remindersPending: number;
+  remindersFailed: number;
+  paymentsLast7d: number;
+  jobs: Array<{ path: string; detail: string; healthy: boolean }>;
+}> {
+  const cronConfigured = Boolean(process.env.CRON_SECRET?.trim());
+  const jobs = [
+    {
+      path: "/api/cron/extend-recurring",
+      detail: cronConfigured
+        ? "Daily at 07:00 (vercel.json)"
+        : "Scheduled, but CRON_SECRET is unset so it returns 401",
+      healthy: cronConfigured,
+    },
+    {
+      path: "/api/cron/send-reminders",
+      detail: cronConfigured
+        ? "Every 15 minutes (vercel.json)"
+        : "Scheduled, but CRON_SECRET is unset so it returns 401",
+      healthy: cronConfigured,
+    },
+  ];
+
+  const empty = { remindersPending: 0, remindersFailed: 0, paymentsLast7d: 0, jobs };
+  if (!supabaseEnvConfigured()) return empty;
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return empty;
+  }
+
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const [pending, failed, payments] = await Promise.all([
+    admin
+      .from("booking_reminders")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending")
+      .lte("scheduled_for", now),
+    admin
+      .from("booking_reminders")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed")
+      .gte("updated_at", weekAgo),
+    admin
+      .from("payments")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", weekAgo),
+  ]);
+
+  return {
+    remindersPending: pending.count ?? 0,
+    remindersFailed: failed.count ?? 0,
+    paymentsLast7d: payments.count ?? 0,
+    jobs,
+  };
 }

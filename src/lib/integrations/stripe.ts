@@ -166,3 +166,32 @@ export async function createDepositIntent(opts: {
     return { ok: false, error: err instanceof Error ? err.message : "Stripe error." };
   }
 }
+
+/**
+ * Refund a captured payment (A17). The dashboard's Refund button used to flip
+ * a value in React state and nothing else, so an owner could believe a
+ * customer had been refunded when no money had moved.
+ *
+ * Returns the refund id; the resulting charge.refunded webhook is what writes
+ * the ledger row and updates the invoice, so this stays the single source of
+ * truth for refund state.
+ */
+export async function refundPayment(opts: {
+  paymentIntentId: string;
+  /** Omit for a full refund. */
+  amountCents?: number;
+  reason?: "duplicate" | "fraudulent" | "requested_by_customer";
+}): Promise<{ ok: true; refundId: string; amountCents: number } | { ok: false; error: string }> {
+  const stripe = getStripe();
+  if (!stripe) return { ok: false, error: "Stripe is not configured." };
+  try {
+    const refund = await stripe.refunds.create({
+      payment_intent: opts.paymentIntentId,
+      ...(opts.amountCents ? { amount: opts.amountCents } : {}),
+      reason: opts.reason ?? "requested_by_customer",
+    });
+    return { ok: true, refundId: refund.id, amountCents: refund.amount };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Stripe error." };
+  }
+}

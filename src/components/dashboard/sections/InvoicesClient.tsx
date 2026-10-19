@@ -1,6 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { cn } from "@/lib/cn";
+import {
+  invoiceDownloadUrl,
+  markInvoicePaid,
+  refundInvoice,
+  sendInvoice,
+} from "@/lib/actions/invoices";
 import { money, shortDate } from "@/lib/format";
 import type { InvoiceView, InvoicesData } from "@/lib/dashboard/types";
 import type { InvoiceStatus } from "@/types/database";
@@ -35,6 +42,8 @@ export function InvoicesClient({
   data: InvoicesData;
 }) {
   const [rows, setRows] = useState(data.invoices);
+  const [busy, setBusy] = useState<"paid" | "refund" | "send" | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const [open, setOpen] = useState<InvoiceView | null>(null);
 
@@ -52,6 +61,36 @@ export function InvoicesClient({
   function update(id: string, patch: Partial<InvoiceView>) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     setOpen((o) => (o && o.id === id ? { ...o, ...patch } : o));
+  }
+
+  /** Run a real server action and reflect whatever it reports back. */
+  async function run(id: string, kind: "paid" | "refund" | "send") {
+    setBusy(kind);
+    setNotice(null);
+    const result =
+      kind === "paid"
+        ? await markInvoicePaid(id)
+        : kind === "refund"
+          ? await refundInvoice(id)
+          : await sendInvoice(id);
+    setBusy(null);
+
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error });
+      return;
+    }
+    update(id, { status: result.status, paidCents: result.paidCents });
+    if (result.message) setNotice({ tone: "ok", text: result.message });
+  }
+
+  async function download(id: string) {
+    setNotice(null);
+    const result = await invoiceDownloadUrl(id);
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error });
+      return;
+    }
+    window.open(result.url, "_blank", "noopener");
   }
 
   return (
@@ -121,23 +160,45 @@ export function InvoicesClient({
           size="lg"
           footer={
             <>
-              <GhostBtn icon="download" onClick={() => {}}>
+              <GhostBtn icon="download" onClick={() => void download(open.id)}>
                 Download PDF
               </GhostBtn>
+              {open.status === "draft" && (
+                <GhostBtn onClick={() => void run(open.id, "send")}>
+                  {busy === "send" ? "Sending…" : "Mark as sent"}
+                </GhostBtn>
+              )}
               {open.status !== "paid" && open.status !== "refunded" && (
-                <ActionButton
-                  icon="check"
-                  onClick={() => update(open.id, { status: "paid", paidCents: open.totalCents })}
-                >
-                  Mark as paid
+                <ActionButton icon="check" onClick={() => void run(open.id, "paid")}>
+                  {busy === "paid" ? "Saving…" : "Record as paid"}
                 </ActionButton>
               )}
               {open.status === "paid" && (
-                <GhostBtn onClick={() => update(open.id, { status: "refunded" })}>Refund</GhostBtn>
+                <GhostBtn onClick={() => void run(open.id, "refund")}>
+                  {busy === "refund" ? "Refunding…" : "Refund"}
+                </GhostBtn>
               )}
             </>
           }
         >
+          {/*
+            Every outcome is reported. These controls used to change local React
+            state only, so an owner could believe a refund had been issued when
+            no money had moved.
+          */}
+          {notice && (
+            <div
+              className={cn(
+                "mb-4 rounded-[10px] border px-4 py-3 text-[0.82rem]",
+                notice.tone === "error"
+                  ? "border-[#e8c0bd] bg-[#fdf6f5] text-[#a63d39]"
+                  : "border-success-500/40 bg-success-50 text-success-700",
+              )}
+              role="status"
+            >
+              {notice.text}
+            </div>
+          )}
           <InvoiceBody iv={open} />
         </Modal>
       )}

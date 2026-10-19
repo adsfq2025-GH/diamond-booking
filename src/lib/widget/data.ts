@@ -12,6 +12,8 @@ import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
 import { createCalendarEventForBooking } from "@/lib/integrations/calendar-sync";
 import { createDepositIntent } from "@/lib/integrations/stripe";
 import { computeOccurrences, type RecurrenceRule } from "@/lib/recurrence";
+import { smsRemindersAllowed } from "@/lib/entitlements";
+import type { PlanTier } from "@/types/database";
 import type {
   AvailableSlot,
   WidgetConfigPayload,
@@ -365,14 +367,21 @@ async function scheduleBookingReminders(input: {
   customerId?: string | null;
   startsAt: string;
   notifications: Record<string, unknown>;
+  /** The tenant's plan, so a paid channel is not queued for free (A19). */
+  plan: PlanTier;
 }) {
   const admin = createAdminClient();
   const reminders: Array<{ channel: string; scheduled_for: string }> = [];
   const startsAt = new Date(input.startsAt).getTime();
-  if (input.notifications.sms_reminders === true && input.notifications.sms_reminder_24h !== false) {
+
+  // SMS is a paid feature with a real Twilio cost per message. The tenant
+  // setting alone used to be enough to queue it, on any plan.
+  const smsAllowed =
+    input.notifications.sms_reminders === true && smsRemindersAllowed(input.plan);
+  if (smsAllowed && input.notifications.sms_reminder_24h !== false) {
     reminders.push({ channel: "sms", scheduled_for: new Date(startsAt - 24 * 60 * 60 * 1000).toISOString() });
   }
-  if (input.notifications.sms_reminders === true && input.notifications.sms_reminder_2h === true) {
+  if (smsAllowed && input.notifications.sms_reminder_2h === true) {
     reminders.push({ channel: "sms", scheduled_for: new Date(startsAt - 2 * 60 * 60 * 1000).toISOString() });
   }
   if (input.notifications.reminder_emails !== false) {
@@ -476,7 +485,7 @@ export async function createWidgetBooking(
   if (bookingRow?.tenant_id) {
     const { data: tenantRow } = await admin
       .from("tenants")
-      .select("settings, stripe_charges_enabled")
+      .select("settings, stripe_charges_enabled, plan")
       .eq("id", bookingRow.tenant_id)
       .maybeSingle();
     const tenantSettings = ((tenantRow?.settings ?? {}) as Record<string, unknown>);
@@ -486,6 +495,7 @@ export async function createWidgetBooking(
       customerId: bookingRow.customer_id,
       startsAt: result.starts_at,
       notifications: (tenantSettings.notifications as Record<string, unknown> | undefined) ?? {},
+      plan: (tenantRow?.plan ?? "starter") as PlanTier,
     }).catch(() => {});
 
     if (result.status === "confirmed") {

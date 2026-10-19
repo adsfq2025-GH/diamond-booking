@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
-import { getAdminData } from "@/lib/portal/admin-data";
+import { getAdminData, getPlatformHealth } from "@/lib/portal/admin-data";
+import { configProblems } from "@/lib/config-check";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { AdminClient } from "@/components/portal/AdminClient";
 
@@ -10,7 +11,8 @@ export default async function AdminPage(props: PageProps<"/admin">) {
   const profile = await requireRole("super_admin");
   const searchParams = await props.searchParams;
   const tab = typeof searchParams.tab === "string" ? searchParams.tab : undefined;
-  const data = await getAdminData();
+  const [data, health] = await Promise.all([getAdminData(), getPlatformHealth()]);
+  const problems = configProblems();
 
   // Platform-level email sender (env-configured), shown read-only in the console.
   const platformEmail =
@@ -22,7 +24,13 @@ export default async function AdminPage(props: PageProps<"/admin">) {
 
   return (
     <PortalShell eyebrow="Platform admin" userName={profile.full_name} userSubtitle="Super admin" accentColor="var(--navy-700)">
-      <AdminClient data={data} platformEmail={platformEmail} initialTab={tab} />
+      <AdminClient
+        data={data}
+        platformEmail={platformEmail}
+        initialTab={tab}
+        health={health}
+        configProblems={problems}
+      />
     </PortalShell>
   );
 }

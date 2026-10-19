@@ -12,6 +12,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth";
+import { tenantPlanContext } from "@/lib/entitlements";
+import { PLANS, withinEmployeeLimit } from "@/lib/plans";
 import type {
   ActionResult,
   BrandingInput,
@@ -206,6 +208,18 @@ export async function saveTeam(input: TeamInput): Promise<ActionResult> {
         color: m.color || "#5a88a8",
       }))
       .filter((m) => m.name.length > 0 || m.email.length > 0);
+
+    // Plan seat limit, enforced on the server (A19). The owner's own bookable
+    // row counts as a seat, since it occupies a calendar.
+    const seats = members.length + (input.ownerBookable ? 1 : 0);
+    const planCtx = await tenantPlanContext();
+    if (planCtx && !withinEmployeeLimit(planCtx.plan, seats)) {
+      const limit = PLANS[planCtx.plan].maxEmployees;
+      return {
+        ok: false,
+        error: `${PLANS[planCtx.plan].name} includes ${limit} team ${limit === 1 ? "member" : "members"} — you have listed ${seats}. Remove some, or upgrade your plan.`,
+      };
+    }
 
     const { error } = await ctx.supabase.rpc("onboarding_save_team", {
       p_owner_bookable: input.ownerBookable,
