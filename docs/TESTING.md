@@ -1,5 +1,11 @@
 # Diamond Booking — Manual Test Script (Auth + Onboarding)
 
+> **Scope note.** This file covers the auth and onboarding happy path. The
+> verification of the October 2026 audit fixes — including the automated SQL
+> tests under `supabase/tests/` — lives in
+> [`STAGING-VERIFICATION.md`](./STAGING-VERIFICATION.md). Run that one before
+> launch; run this one when first wiring up a fresh environment.
+
 This is the checklist to run **the moment real Supabase keys land in
 `.env.local`**. Everything below is fully wired; it was verified in this
 phase via `npm run lint`, `npm run build`, pure-logic tests (slug
@@ -10,9 +16,8 @@ live verification.
 
 ## 0. Prerequisites
 
-1. Create the Supabase project and apply migrations **in order**
-   (`0001_schema.sql` → `0002_rls.sql` → `0003_functions.sql` →
-   `0004_onboarding.sql`) per `docs/BACKEND.md`.
+1. Create the Supabase project and apply **all ten** migrations in order,
+   `0001` through `0010`, per `docs/BACKEND.md`.
 2. Fill `.env.local`:
    - `NEXT_PUBLIC_APP_URL` (e.g. `http://localhost:3000`)
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,

@@ -31,8 +31,13 @@ Full details in [`docs/BACKEND.md`](./BACKEND.md). Short version:
 
 1. Create a project at <https://supabase.com/dashboard> (pick a region near your
    customers). Save the DB password.
-2. Apply the migrations **in order** (SQL editor or CLI):
-   `0001_schema.sql` → `0002_rls.sql` → `0003_functions.sql` → `0004_onboarding.sql`.
+2. Apply **all ten** migrations in order (SQL editor or CLI), `0001` through
+   `0010`. The list and what each one does is in
+   [`docs/BACKEND.md`](./BACKEND.md).
+   If this database already has real data, use
+   [`docs/STAGING-VERIFICATION.md`](./STAGING-VERIFICATION.md) instead of doing
+   it by hand: `0007` migrates stored SMTP credentials and strips the originals,
+   and that step wants checking before and after.
 3. (Optional) Run `supabase/seed.sql` to load the demo tenant for a smoke test,
    then delete it before real launch.
 4. Copy the three keys from **Project Settings → API** into `.env.local`

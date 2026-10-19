@@ -24,6 +24,20 @@ The migrations are ordered and must be applied in this order:
 | `supabase/migrations/0001_schema.sql` | extensions, enums, all tables, indexes, no-double-booking exclusion constraint, RLS helper functions, `employee_directory` view |
 | `supabase/migrations/0002_rls.sql` | RLS enabled + full policy rollout for every table, `branding`/`invoices` storage buckets + policies |
 | `supabase/migrations/0003_functions.sql` | `updated_at` triggers, invoice numbering (INV-YYYY-NNNN), audit-log triggers, widget RPCs (`get_widget_config`, `get_available_slots`, `create_widget_booking`) |
+| `supabase/migrations/0004_onboarding.sql` | `employees.display_name` (a name for a teammate who has not accepted an invite yet) + `employee_directory` fallback |
+| `supabase/migrations/0005_recurrence.sql` | recurring bookings: `recurrence_group_id` / `_rule` / `_until` on bookings |
+| `supabase/migrations/0006_integrations.sql` | Stripe Connect columns, `google_calendar_connections`, `booking_reminders` |
+| `supabase/migrations/0007_security.sql` | **security pass:** identity-column guard on `profiles`, `tenant_secrets` (credentials out of tenant-readable rows), own-row OAuth tokens, unique index on `payments.stripe_payment_intent_id` |
+| `supabase/migrations/0008_booking_correctness.sql` | shared `booking_duration_minutes()` / `booking_conflicts()`, add-on-aware `get_available_slots`, symmetric buffer enforcement |
+| `supabase/migrations/0009_onboarding_upsert.sql` | transactional `onboarding_save_catalog` / `onboarding_save_team`, `onboarding_readiness`, service pricing-model columns |
+| `supabase/migrations/0010_completeness.sql` | `contact_submissions`, `booking_inquiries`, `employee_invitations`, coupon pricing (`price_coupon`, `quote_booking`, `apply_coupon_to_booking`), `merge_tenant_settings` |
+
+> **0007–0010 came from the October 2026 audit.** Applying them to a database
+> that already holds data has one irreversible step: `0007` moves SMTP
+> credentials out of `tenants.settings` into `tenant_secrets` and then strips
+> the original. Follow [`STAGING-VERIFICATION.md`](./STAGING-VERIFICATION.md) —
+> it has the before/after queries that prove the move succeeded, and the tests
+> that prove the policies work.
 
 ### Option A — Supabase CLI (recommended)
 
@@ -46,8 +60,11 @@ npx supabase db push                    # applies supabase/migrations/* in order
 
 ### Option B — SQL editor (no CLI)
 
-Dashboard → **SQL Editor** → paste and run each file **in order**:
-`0001_schema.sql`, then `0002_rls.sql`, then `0003_functions.sql`.
+Dashboard → **SQL Editor** → paste and run each file **in order**, one at a
+time, reading the result before moving on: `0001_schema.sql` → `0002_rls.sql` →
+`0003_functions.sql` → `0004_onboarding.sql` → `0005_recurrence.sql` →
+`0006_integrations.sql` → `0007_security.sql` → `0008_booking_correctness.sql`
+→ `0009_onboarding_upsert.sql` → `0010_completeness.sql`.
 
 ## 3. Seed demo data (optional, staging/local only)
 
