@@ -108,7 +108,7 @@ export async function rescheduleBooking(
 
   const { data: booking, error: bookingError } = await s.supabase
     .from("bookings")
-    .select("id, tenant_id, starts_at, ends_at, status")
+    .select("id, tenant_id, starts_at, ends_at, status, employee_id, services(buffer_before_minutes, buffer_after_minutes)")
     .eq("id", id)
     .eq("tenant_id", s.tenantId)
     .maybeSingle();
@@ -124,6 +124,30 @@ export async function rescheduleBooking(
   const durationMs = new Date(booking.ends_at).getTime() - new Date(booking.starts_at).getTime();
   const nextEnd = new Date(parsedStart.getTime() + durationMs).toISOString();
 
+  // Pre-check the move. Without this the only guard was the no_double_booking
+  // exclusion constraint, which surfaced to the owner as a raw Postgres
+  // exclusion-violation dump — and which ignores buffers entirely, so a move
+  // that violated the service's own buffers was accepted silently (A38).
+  if (booking.employee_id) {
+    const svc = Array.isArray(booking.services) ? booking.services[0] : booking.services;
+    const { data: clash, error: clashError } = await s.supabase.rpc("booking_conflicts", {
+      p_employee_id: booking.employee_id,
+      p_start: parsedStart.toISOString(),
+      p_end: nextEnd,
+      p_buffer_before_minutes: svc?.buffer_before_minutes ?? 0,
+      p_buffer_after_minutes: svc?.buffer_after_minutes ?? 0,
+      p_ignore_booking_id: id,
+    });
+    if (clashError) return { ok: false, error: clashError.message };
+    if (clash) {
+      return {
+        ok: false,
+        error:
+          "That time clashes with another booking for this team member (including its buffers). Pick a different time.",
+      };
+    }
+  }
+
   const { error } = await s.supabase
     .from("bookings")
     .update({
@@ -134,7 +158,14 @@ export async function rescheduleBooking(
     .eq("id", id)
     .eq("tenant_id", s.tenantId);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Last-resort guard: a concurrent booking won the race between the
+    // pre-check and the write.
+    const message = /exclu|overlap|23P01/i.test(error.message)
+      ? "That time was just taken by another booking. Pick a different time."
+      : error.message;
+    return { ok: false, error: message };
+  }
 
   await rescheduleBookingReminders({
     supabase: s.supabase,

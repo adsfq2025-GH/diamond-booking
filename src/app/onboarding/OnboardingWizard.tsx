@@ -12,6 +12,7 @@ import type {
   FinishInput,
   HoursInput,
   LaunchReadiness,
+  GlobalAddonInput,
   ServiceInput,
   TeamInput,
   WizardData,
@@ -121,10 +122,10 @@ export function OnboardingWizard({
       2,
     );
 
-  const submitServices = (next: ServiceInput[]) =>
+  const submitServices = (next: ServiceInput[], addons: GlobalAddonInput[]) =>
     runSave(
-      () => saveServices(next),
-      () => setData((d) => ({ ...d, services: next })),
+      () => saveServices(next, addons),
+      () => setData((d) => ({ ...d, services: next, addons })),
       3,
     );
 
@@ -301,6 +302,7 @@ export function OnboardingWizard({
                 ) : step === 2 ? (
                   <ServicesStep
                     value={data.services}
+                    savedAddons={data.addons}
                     industry={data.business.industry}
                     busy={saving}
                     onSubmit={submitServices}

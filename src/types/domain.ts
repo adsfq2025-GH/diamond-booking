@@ -57,7 +57,12 @@ export type PaymentKind = "payment" | "deposit" | "refund";
 export interface AvailableSlot {
   slot_start: string;
   slot_end: string;
-  employee_id: string;
+  /**
+   * Null once the slot list has been collapsed for display: the RPC returns a
+   * row per qualified employee, and the booking RPC re-picks a free one at
+   * insert time so a single visible choice keeps the slot's full capacity.
+   */
+  employee_id: string | null;
 }
 
 /** Result of the create_widget_booking RPC. */
@@ -71,6 +76,16 @@ export interface WidgetBookingResult {
   deposit_cents: number;
   deposit_client_secret?: string | null;
   deposit_payment_intent_id?: string | null;
+  /**
+   * For a recurring request: what was actually reserved. Occurrences whose
+   * time was already taken are skipped, and the customer is told which —
+   * they used to be dropped silently.
+   */
+  recurrence?: {
+    reserved: number;
+    skipped: string[];
+    incomplete: boolean;
+  };
 }
 
 /** Shape of the get_widget_config RPC payload. */

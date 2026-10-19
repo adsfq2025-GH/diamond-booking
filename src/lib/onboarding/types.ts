@@ -59,6 +59,13 @@ export interface ServiceInput {
   localId: string;
   name: string;
   category: string;
+  /**
+   * How long the job occupies the calendar. Previously absent, so onboarding
+   * wrote a hardcoded 60 for every flat-rate service and discarded what the
+   * owner intended — a four-hour flat-rate job was booked as one hour, which
+   * overlapped the calendar and defeated the no-double-booking guarantee (A14).
+   */
+  duration_minutes: number;
   price_cents: number;
   deposit_cents: number;
   buffer_before_minutes: number;
@@ -125,6 +132,7 @@ export interface LaunchReadiness {
 export interface WizardData {
   business: BusinessInfoInput;
   services: ServiceInput[];
+  /** Extras offered on every service. Persisted with the catalog (A13). */
   addons?: GlobalAddonInput[];
   team: TeamInput;
   hours: HoursInput;

@@ -108,6 +108,10 @@ export interface ServiceView {
   depositCents: number;
   bufferBefore: number;
   bufferAfter: number;
+  /** How the price is quoted. Persisted since 0009 — it used to be discarded. */
+  pricingModel: "flat" | "hourly" | "square_foot" | "custom";
+  minimumHours: number | null;
+  pricingUnitLabel: string | null;
   active: boolean;
   addons: AddonView[];
   /** How many team members can perform it. */

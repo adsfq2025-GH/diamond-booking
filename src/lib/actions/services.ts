@@ -20,8 +20,14 @@ export interface ServiceDraft {
   durationMinutes: number;
   priceCents: number;
   depositCents: number;
-  pricingModel?: "fixed" | "hourly" | "square_foot";
+  /**
+   * Same four values the database and the onboarding wizard use. "fixed" is
+   * accepted as a legacy alias for "flat" — the dashboard and the wizard used
+   * to disagree on the name, and neither persisted the choice at all (F06).
+   */
+  pricingModel?: "flat" | "fixed" | "hourly" | "square_foot" | "custom";
   minimumHours?: number;
+  pricingUnitLabel?: string;
   bufferAfter: number;
   addons: ServiceAddonDraft[];
 }
@@ -61,6 +67,10 @@ export async function saveService(input: ServiceDraft): Promise<Result> {
     deposit_cents: Math.max(0, Math.round(input.depositCents) || 0),
     buffer_before_minutes: 0,
     buffer_after_minutes: Math.max(0, Math.round(input.bufferAfter) || 0),
+    pricing_unit: input.pricingModel === "fixed" ? "flat" : (input.pricingModel ?? "flat"),
+    minimum_hours:
+      input.pricingModel === "hourly" ? (input.minimumHours ?? null) : null,
+    pricing_unit_label: input.pricingUnitLabel?.trim() || null,
   };
 
   let serviceId = input.id;

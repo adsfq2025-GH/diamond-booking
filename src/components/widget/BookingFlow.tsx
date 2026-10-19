@@ -152,6 +152,7 @@ export function BookingFlow({
             <TimeStep
               publicKey={publicKey}
               service={service}
+              addonIds={[...addons]}
               date={date}
               slot={slot}
               accent={accent}
@@ -191,7 +192,10 @@ export function BookingFlow({
                   customerName: details.name,
                   customerEmail: details.email,
                   customerPhone: details.phone || null,
-                  employeeId: slot.employee_id,
+                  // Deliberately null: let the RPC pick any free qualified
+                  // employee at insert time so the whole capacity of this slot
+                  // stays usable (see getAvailableSlots' dedupe).
+                  employeeId: null,
                   address: details.address ? { line1: details.address } : null,
                   notes: [details.notes, ...Object.entries(custom).map(([k, v]) => `${k}: ${v}`)]
                     .filter(Boolean)
@@ -340,8 +344,8 @@ function ServiceStep({
       {selected && (
         <div className="mt-3 rounded-[12px] border border-line bg-card px-4 py-3 text-[0.76rem] leading-[1.6] text-ink-muted">
           {selected.deposit_cents > 0
-            ? `A ${money(selected.deposit_cents)} deposit may be collected after confirmation, depending on this business's payment setup.`
-            : "No deposit is required for this service unless the business updates its payment policy later."}
+            ? `This service has a ${money(selected.deposit_cents)} deposit. Nothing is charged here — the business will arrange it with you after booking.`
+            : "No deposit is required for this service."}
         </div>
       )}
 
@@ -356,6 +360,7 @@ function ServiceStep({
 function TimeStep({
   publicKey,
   service,
+  addonIds,
   date,
   slot,
   accent,
@@ -367,6 +372,8 @@ function TimeStep({
 }: {
   publicKey: string;
   service: Service;
+  /** Selected add-ons: they extend the job, so they change which slots fit. */
+  addonIds: string[];
   date: Date;
   slot: AvailableSlot | null;
   accent: string;
@@ -389,18 +396,22 @@ function TimeStep({
   }, []);
 
   const dateKey = isoDate(date);
+  // Add-ons are part of the cache key: changing them changes which start times
+  // can actually hold the job, so the list must be re-fetched (A09).
+  const addonKey = useMemo(() => [...addonIds].sort().join(","), [addonIds]);
+  const loadKey = `${dateKey}|${addonKey}`;
   useEffect(() => {
     let alive = true;
-    fetchSlots(publicKey, service.id, dateKey).then((s) => {
-      if (alive) setLoaded({ key: dateKey, slots: s });
+    fetchSlots(publicKey, service.id, dateKey, addonKey ? addonKey.split(",") : []).then((s) => {
+      if (alive) setLoaded({ key: loadKey, slots: s });
     });
     return () => {
       alive = false;
     };
-  }, [publicKey, service.id, dateKey]);
+  }, [publicKey, service.id, dateKey, addonKey, loadKey]);
 
-  const loading = loaded?.key !== dateKey;
-  const slots = loaded?.key === dateKey ? loaded.slots : [];
+  const loading = loaded?.key !== loadKey;
+  const slots = loaded?.key === loadKey ? loaded.slots : [];
 
   return (
     <div>
@@ -723,11 +734,61 @@ function DoneStep({
         <Row label="Total" value={money(result.price_cents)} />
         {result.deposit_cents > 0 && <Row label="Deposit due" value={money(result.deposit_cents)} />}
       </div>
+      {/*
+        Honest deposit state. No card is collected here: online capture is not
+        implemented yet, so claiming a payment step exists — or that an intent
+        means money moved — would be false. The deposit is owed to the business,
+        and the message says exactly that (A12).
+      */}
       {result.deposit_cents > 0 && (
         <div className="mt-4 rounded-[12px] border border-gold-300 bg-gold-50 px-4 py-3 text-left text-[0.82rem] text-ink-muted">
-          {result.deposit_client_secret
-            ? "Stripe deposit intent created successfully. Payment capture UI is the next step to wire into this screen."
-            : "Your booking was created. If online payments are enabled for this business, the deposit will be collected in the next payment step."}
+          <span className="font-semibold text-ink">No payment has been taken.</span>{" "}
+          A {money(result.deposit_cents)} deposit is due for this appointment —
+          the business will contact you to arrange it before your visit.
+        </div>
+      )}
+
+      {/*
+        Recurring series: say which dates were actually reserved and which were
+        already taken, rather than implying the whole series was booked (A28).
+      */}
+      {result.recurrence && (
+        <div className="mt-4 rounded-[12px] border border-line bg-surface-alt/50 px-4 py-3 text-left text-[0.82rem] text-ink-muted">
+          {result.recurrence.reserved > 0 && (
+            <p>
+              <span className="font-semibold text-ink">
+                {result.recurrence.reserved} more {result.recurrence.reserved === 1 ? "visit" : "visits"}
+              </span>{" "}
+              reserved after this one.
+            </p>
+          )}
+          {result.recurrence.skipped.length > 0 && (
+            <p className="mt-1.5">
+              These dates were already taken and were{" "}
+              <span className="font-semibold text-ink">not</span> booked:{" "}
+              {result.recurrence.skipped
+                .map((iso) =>
+                  new Date(iso).toLocaleDateString("en-US", {
+                    timeZone: tz,
+                    month: "short",
+                    day: "numeric",
+                  }),
+                )
+                .join(", ")}
+              . Contact the business to find an alternative.
+            </p>
+          )}
+          {result.recurrence.incomplete && (
+            <p className="mt-1.5">
+              We could not finish reserving the rest of the series. The business
+              will be in touch to confirm your remaining visits.
+            </p>
+          )}
+          {result.recurrence.reserved === 0 &&
+            result.recurrence.skipped.length === 0 &&
+            !result.recurrence.incomplete && (
+              <p>Only this visit was reserved.</p>
+            )}
         </div>
       )}
       <p className="mt-4 text-[0.8rem] text-ink-faint">

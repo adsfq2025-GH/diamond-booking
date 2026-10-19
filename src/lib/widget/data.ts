@@ -110,30 +110,56 @@ export async function getWidgetConfig(
 }
 
 /**
- * Available slots for a service on a date ('YYYY-MM-DD'). In preview mode we
- * synthesize slots from the mock business hours + service duration.
+ * Available slots for a service on a date ('YYYY-MM-DD'), for the service plus
+ * the selected add-ons. In preview mode we synthesize slots from the mock
+ * business hours + the same duration calculation.
+ *
+ * The RPC returns one row per (slot, employee) because capacity is per
+ * employee. Customers must see each time ONCE — showing it per employee was
+ * the duplicate-times defect (A11) — so we collapse by slot_start here and
+ * deliberately drop the employee id: the booking RPC re-picks a free qualified
+ * employee at insert time, which keeps the full capacity of the slot instead
+ * of pinning it to whichever employee happened to be listed first.
  */
 export async function getAvailableSlots(
   publicKey: string,
   serviceId: string,
   date: string,
+  addonIds: string[] = [],
 ): Promise<AvailableSlot[]> {
   if (!supabaseEnvConfigured()) {
-    return mockSlots(serviceId, date);
+    return dedupeSlots(mockSlots(serviceId, date, addonIds));
   }
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("get_available_slots", {
     p_public_key: publicKey,
     p_service_id: serviceId,
     p_date: date,
+    p_addon_ids: addonIds,
   });
   if (error || !data) return [];
-  return data as AvailableSlot[];
+  return dedupeSlots(data as AvailableSlot[]);
 }
 
-function mockSlots(serviceId: string, date: string): AvailableSlot[] {
+/** One visible choice per start time, ordered, with no employee pinned. */
+function dedupeSlots(slots: AvailableSlot[]): AvailableSlot[] {
+  const byStart = new Map<string, AvailableSlot>();
+  for (const s of slots) {
+    if (!byStart.has(s.slot_start)) {
+      byStart.set(s.slot_start, { ...s, employee_id: null });
+    }
+  }
+  return [...byStart.values()].sort((a, b) => a.slot_start.localeCompare(b.slot_start));
+}
+
+function mockSlots(serviceId: string, date: string, addonIds: string[] = []): AvailableSlot[] {
   const svc = mockConfig().services.find((s) => s.id === serviceId);
-  const duration = svc?.duration_minutes ?? 60;
+  // Mirror booking_duration_minutes(): service + selected add-ons.
+  const duration =
+    (svc?.duration_minutes ?? 60) +
+    (svc?.addons ?? [])
+      .filter((a) => addonIds.includes(a.id))
+      .reduce((sum, a) => sum + (a.duration_minutes ?? 0), 0);
   const [y, m, d] = date.split("-").map(Number);
   const day = new Date(y, m - 1, d);
   const hours = MOCK_HOURS[day.getDay()];
@@ -165,6 +191,40 @@ function mockSlots(serviceId: string, date: string): AvailableSlot[] {
     cursor = new Date(cursor.getTime() + step * 60000);
   }
   return slots;
+}
+
+/**
+ * Turn the booking RPC's error codes into something a customer can act on.
+ * Raw Postgres messages ("slot_taken", or an exclusion-violation dump) used to
+ * be shown verbatim. Unknown codes fall back to a neutral message rather than
+ * leaking internals.
+ */
+function bookingErrorMessage(raw?: string): string {
+  const code = (raw ?? "").toLowerCase();
+  if (code.includes("slot_taken")) {
+    return "That time was just booked by someone else. Please pick another time.";
+  }
+  if (code.includes("no_qualified_staff")) {
+    return "Nobody is scheduled to provide that service at that time. Please pick another time.";
+  }
+  if (code.includes("outside_business_hours")) {
+    return "That appointment would run past closing time. Please pick an earlier start.";
+  }
+  if (code.includes("crosses_midnight")) {
+    return "That appointment is too long to fit in one day. Please contact the business directly.";
+  }
+  if (code.includes("slot_in_past")) {
+    return "That time has already passed. Please pick another time.";
+  }
+  if (code.includes("service_not_found")) {
+    return "That service is no longer available.";
+  }
+  if (code.includes("widget_not_found")) {
+    return "This booking page is not currently accepting appointments.";
+  }
+  if (code.includes("email_required")) return "Please enter your email address.";
+  if (code.includes("name_required")) return "Please enter your name.";
+  return "Could not create the booking. Please try again.";
 }
 
 export interface CreateBookingInput {
@@ -207,22 +267,39 @@ export async function getWidgetRecurringEnabled(publicKey: string): Promise<bool
   }
 }
 
+/** What actually happened to a recurring series, so we can tell the customer. */
+export interface RecurrenceOutcome {
+  /** Occurrences successfully reserved, not counting the first booking. */
+  reserved: number;
+  /** ISO dates that could not be reserved because the time was taken. */
+  skipped: string[];
+  /** True when the run stopped early on an unexpected error. */
+  incomplete: boolean;
+}
+
 /**
  * Reserve every future occurrence of a recurring booking as its own bookings
- * row (service role). Rows share recurrence_group_id. Occurrences that would
- * clash with an existing booking (GiST exclusion) are skipped, not fatal.
+ * row (service role). Rows share recurrence_group_id.
+ *
+ * Occurrences that clash with an existing booking are skipped rather than
+ * fatal — but they are REPORTED. Previously they were dropped silently and the
+ * customer was told their standing appointment was booked, with no way to learn
+ * which dates were missing (A28).
  */
 async function materializeRecurrence(
   firstBookingId: string,
   rule: RecurrenceRule,
   recurrenceUntil: string | null,
-): Promise<void> {
-  if (!rule || rule === "none") return;
+): Promise<RecurrenceOutcome> {
+  const outcome: RecurrenceOutcome = { reserved: 0, skipped: [], incomplete: false };
+  if (!rule || rule === "none") return outcome;
   let admin: ReturnType<typeof createAdminClient>;
   try {
     admin = createAdminClient();
   } catch {
-    return; // no service-role key — skip (first booking still stands)
+    // No service-role key: the first booking stands, the series does not.
+    outcome.incomplete = true;
+    return outcome;
   }
 
   const { data: first } = await admin
@@ -230,7 +307,10 @@ async function materializeRecurrence(
     .select("*")
     .eq("id", firstBookingId)
     .maybeSingle();
-  if (!first) return;
+  if (!first) {
+    outcome.incomplete = true;
+    return outcome;
+  }
 
   const groupId = crypto.randomUUID();
   const until = recurrenceUntil ? new Date(recurrenceUntil) : null;
@@ -263,12 +343,20 @@ async function materializeRecurrence(
       recurrence_rule: rule,
       recurrence_until: recurrenceUntil ?? null,
     });
-    // Overlap with an existing booking -> that slot is already taken; skip it.
-    if (error && !/exclu|overlap|conflict|23P01/i.test(error.message)) {
-      // Non-conflict error: stop trying further occurrences.
+    if (!error) {
+      outcome.reserved += 1;
+    } else if (/exclu|overlap|conflict|23P01/i.test(error.message)) {
+      // That time is already taken; the rest of the series still stands.
+      outcome.skipped.push(start.toISOString());
+    } else {
+      // Something unexpected: stop, and say the series is incomplete.
+      console.error("[recurrence] stopped early", error);
+      outcome.incomplete = true;
       break;
     }
   }
+
+  return outcome;
 }
 
 async function scheduleBookingReminders(input: {
@@ -315,7 +403,10 @@ export async function createWidgetBooking(
   if (!supabaseEnvConfigured()) {
     if (!svc) return { ok: false, error: "Service not found." };
     const start = new Date(input.startsAt);
-    const end = new Date(start.getTime() + svc.duration_minutes * 60000);
+    const addonMinutes = svc.addons
+      .filter((a) => (input.addonIds ?? []).includes(a.id))
+      .reduce((sum, a) => sum + (a.duration_minutes ?? 0), 0);
+    const end = new Date(start.getTime() + (svc.duration_minutes + addonMinutes) * 60000);
     return {
       ok: true,
       result: {
@@ -344,7 +435,7 @@ export async function createWidgetBooking(
     p_addon_ids: input.addonIds ?? [],
   });
   if (error || !data) {
-    return { ok: false, error: error?.message ?? "Could not create booking." };
+    return { ok: false, error: bookingErrorMessage(error?.message) };
   }
   const result = data as unknown as WidgetBookingResult;
 
@@ -357,11 +448,12 @@ export async function createWidgetBooking(
 
   // Reserve future occurrences on the calendar (blocks availability).
   if (input.recurrence && input.recurrence !== "none") {
-    await materializeRecurrence(
+    const outcome = await materializeRecurrence(
       result.booking_id,
       input.recurrence,
       input.recurrenceUntil ?? null,
-    ).catch(() => {});
+    ).catch((): RecurrenceOutcome => ({ reserved: 0, skipped: [], incomplete: true }));
+    result.recurrence = outcome;
   }
 
   // Fire-and-forget confirmation email (tenant SMTP → platform Resend → no-op).

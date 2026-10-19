@@ -18,6 +18,7 @@ import type {
   BusinessInfoInput,
   FinishInput,
   HoursInput,
+  GlobalAddonInput,
   ServiceInput,
   TeamInput,
   TenantBranding,
@@ -104,8 +105,22 @@ export async function saveBusinessInfo(
 // ============================================================
 // Step 2 — Services
 // ============================================================
+/**
+ * Persist the service catalog and the extras offered on it.
+ *
+ * Delegates to onboarding_save_catalog (0009), which upserts by service name
+ * inside ONE transaction and keeps ids stable. The previous implementation
+ * deleted every add-on and then every service: on a tenant with bookings the
+ * services delete failed on the ON DELETE RESTRICT from bookings — after the
+ * add-ons were already gone, with no rollback — and the add-ons were never
+ * re-inserted in the first place (A13).
+ *
+ * A service the owner removes from the list is deactivated when a booking
+ * references it and deleted only when nothing does, so history survives.
+ */
 export async function saveServices(
   services: ServiceInput[],
+  addons: GlobalAddonInput[] = [],
 ): Promise<SaveIdsResult> {
   try {
     const ctx = await ownerContext();
@@ -120,40 +135,46 @@ export async function saveServices(
       return { ok: false, error: "Add at least one service before continuing." };
     }
 
-    // Pre-launch reconcile: replace the tenant's catalog wholesale. Safe
-    // during onboarding (no bookings can reference these rows yet). Delete
-    // add-ons first (they reference services).
-    await ctx.supabase.from("service_addons").delete().eq("tenant_id", ctx.tenantId);
-    const { error: deleteError } = await ctx.supabase
-      .from("services")
-      .delete()
-      .eq("tenant_id", ctx.tenantId);
-    if (deleteError) throw deleteError;
-
-    const rows: TablesInsert<"services">[] = clean.map((s, i) => ({
-      tenant_id: ctx.tenantId,
+    const payload = clean.map((s) => ({
       name: s.name,
       category: s.category || null,
+      // Honour the duration the owner entered for BOTH pricing modes. Hourly
+      // services derive it from the minimum billable hours; flat-rate ones use
+      // the duration field directly instead of a hardcoded 60 (A14).
       duration_minutes:
         s.pricing_unit === "hourly"
-          ? Math.max(30, Math.round((s.minimum_hours ?? 1) * 60))
-          : 60,
+          ? Math.max(15, Math.round((s.minimum_hours ?? 1) * 60))
+          : Math.max(15, Math.round(s.duration_minutes) || 60),
       price_cents: Math.max(0, Math.round(s.price_cents) || 0),
       deposit_cents: Math.max(0, Math.round(s.deposit_cents) || 0),
       buffer_before_minutes: Math.max(0, Math.round(s.buffer_before_minutes) || 0),
       buffer_after_minutes: Math.max(0, Math.round(s.buffer_after_minutes) || 0),
-      active: true,
-      sort: i + 1,
+      // Persisted so reopening the wizard shows the model the owner chose,
+      // instead of re-presenting every service as hourly.
+      pricing_unit: s.pricing_unit ?? "hourly",
+      minimum_hours: s.minimum_hours ?? null,
+      pricing_unit_label: s.custom_pricing_unit_label?.trim() || null,
     }));
-    const { data: inserted, error: insertError } = await ctx.supabase
-      .from("services")
-      .insert(rows)
-      .select("id");
-    if (insertError || !inserted) throw insertError ?? new Error("insert failed");
 
-    // Insert add-ons per service (inserted[] is parallel to clean[]).
+    const addonPayload = addons
+      .map((a) => ({
+        name: a.name.trim(),
+        price_cents: Math.max(0, Math.round(a.price_cents) || 0),
+        // An add-on's duration is what makes availability honest: a 30-minute
+        // extra must remove the start times that can no longer hold the job.
+        duration_minutes: Math.max(0, Math.round(a.duration_minutes) || 0),
+      }))
+      .filter((a) => a.name.length > 0);
+
+    const { data, error } = await ctx.supabase.rpc("onboarding_save_catalog", {
+      p_services: payload as unknown as Json,
+      p_addons: addonPayload as unknown as Json,
+    });
+    if (error) throw error;
+
+    const result = (data ?? {}) as { service_ids?: string[] };
     await mergeSettings(ctx, {}, 3);
-    return { ok: true, ids: inserted.map((r) => r.id) };
+    return { ok: true, ids: result.service_ids ?? [] };
   } catch (err) {
     console.error("saveServices failed", err);
     return { ok: false, error: GENERIC_ERROR };
@@ -163,48 +184,35 @@ export async function saveServices(
 // ============================================================
 // Step 3 — Team
 // ============================================================
+/**
+ * Persist the team.
+ *
+ * Delegates to onboarding_save_team (0009): upsert by invite email (then by
+ * display name) in one transaction. The previous implementation deleted every
+ * employees row first — and employees is ON DELETE SET NULL from bookings, so
+ * that silently unassigned every existing booking and released the slots the
+ * no_double_booking constraint was holding (A13). Anyone with bookings is now
+ * deactivated instead of deleted.
+ */
 export async function saveTeam(input: TeamInput): Promise<ActionResult> {
   try {
     const ctx = await ownerContext();
 
-    // Pre-launch reconcile: replace employee rows wholesale (no bookings yet).
-    const { error: deleteError } = await ctx.supabase
-      .from("employees")
-      .delete()
-      .eq("tenant_id", ctx.tenantId);
-    if (deleteError) throw deleteError;
+    const members = input.members
+      .map((m) => ({
+        name: m.name.trim(),
+        email: m.email.trim().toLowerCase(),
+        title: m.title.trim(),
+        color: m.color || "#5a88a8",
+      }))
+      .filter((m) => m.name.length > 0 || m.email.length > 0);
 
-    const rows: TablesInsert<"employees">[] = [];
-    if (input.ownerBookable) {
-      rows.push({
-        tenant_id: ctx.tenantId,
-        profile_id: ctx.profile.id,
-        display_name: ctx.profile.full_name,
-        title: "Owner",
-        color: input.ownerColor || "#2e86c1",
-        active: true,
-      });
-    }
-    for (const member of input.members) {
-      const name = member.name.trim();
-      const email = member.email.trim().toLowerCase();
-      if (!name && !email) continue;
-      rows.push({
-        tenant_id: ctx.tenantId,
-        invite_email: email || null,
-        display_name: name || null,
-        title: member.title.trim() || null,
-        color: member.color || "#5a88a8",
-        active: true,
-      });
-    }
-
-    if (rows.length > 0) {
-      const { error: insertError } = await ctx.supabase
-        .from("employees")
-        .insert(rows);
-      if (insertError) throw insertError;
-    }
+    const { error } = await ctx.supabase.rpc("onboarding_save_team", {
+      p_owner_bookable: input.ownerBookable,
+      p_owner_color: input.ownerColor || "#2e86c1",
+      p_members: members as unknown as Json,
+    });
+    if (error) throw error;
 
     await mergeSettings(ctx, {}, 4);
     return { ok: true };
@@ -295,10 +303,28 @@ export async function saveBranding(input: BrandingInput): Promise<ActionResult> 
 // ============================================================
 // Step 6 — Booking settings + finish
 // ============================================================
+/**
+ * Human-readable text for each readiness blocker onboarding_readiness() can
+ * report. Owners get told what is actually missing instead of a generic error.
+ */
+const READINESS_BLOCKERS: Record<string, string> = {
+  no_active_services: "no active services",
+  no_active_staff: "nobody is set up to do the work",
+  no_open_days: "the business is closed every day of the week",
+  no_staff_qualified_for_any_service: "no team member is linked to a service",
+  no_staff_working_hours: "no team member has any working hours",
+  deposits_configured_without_stripe_charges:
+    "services require a deposit but Stripe cannot accept charges yet",
+};
+
 export async function finishOnboarding(input: FinishInput): Promise<ActionResult> {
   try {
     const ctx = await ownerContext();
 
+    // Settings first, WITHOUT the completion flag. The flag is set at the end,
+    // and only once the database can prove the tenant is bookable — it used to
+    // be written before any of the work below, so a failure left a tenant
+    // marked complete with a widget that could never offer a slot (A21).
     await mergeSettings(ctx, {
       auto_confirm: input.auto_confirm,
       cancellation_policy: input.cancellation_policy.trim(),
@@ -309,7 +335,6 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
       deposit_required: input.deposit_required,
       payments_enabled: input.payments_enabled,
       recurring_enabled: input.recurring_enabled,
-      onboarding_complete: true,
       onboarding_step: 6,
     });
 
@@ -373,9 +398,58 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
       }
     }
 
+    // Now ask the database whether this tenant can actually take a booking.
+    const { data: readinessRow, error: readinessError } =
+      await ctx.supabase.rpc("onboarding_readiness");
+    if (readinessError) throw readinessError;
+
+    const readiness = (readinessRow ?? {}) as {
+      booking_ready?: boolean;
+      blockers?: string[];
+    };
+    if (!readiness.booking_ready) {
+      const reasons = (readiness.blockers ?? [])
+        .map((b) => READINESS_BLOCKERS[b] ?? b)
+        .join("; ");
+      return {
+        ok: false,
+        error: reasons
+          ? `Not quite ready to publish — ${reasons}. Fix that and finish again.`
+          : "Not quite ready to publish: this business cannot take a booking yet.",
+      };
+    }
+
+    // Proven bookable: only now is onboarding complete.
+    await mergeSettings(ctx, { onboarding_complete: true }, 6);
     return { ok: true };
   } catch (err) {
     console.error("finishOnboarding failed", err);
+    return { ok: false, error: GENERIC_ERROR };
+  }
+}
+
+/** Readiness for the dashboard and the wizard's finish screen. */
+export async function getOnboardingReadiness(): Promise<
+  | { ok: true; bookingReady: boolean; paymentReady: boolean; blockers: string[] }
+  | { ok: false; error: string }
+> {
+  try {
+    const ctx = await ownerContext();
+    const { data, error } = await ctx.supabase.rpc("onboarding_readiness");
+    if (error) throw error;
+    const r = (data ?? {}) as {
+      booking_ready?: boolean;
+      payment_ready?: boolean;
+      blockers?: string[];
+    };
+    return {
+      ok: true,
+      bookingReady: Boolean(r.booking_ready),
+      paymentReady: Boolean(r.payment_ready),
+      blockers: (r.blockers ?? []).map((b) => READINESS_BLOCKERS[b] ?? b),
+    };
+  } catch (err) {
+    console.error("getOnboardingReadiness failed", err);
     return { ok: false, error: GENERIC_ERROR };
   }
 }

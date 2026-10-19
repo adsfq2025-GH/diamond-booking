@@ -180,6 +180,9 @@ export interface Database {
           deposit_cents: number;
           buffer_before_minutes: number;
           buffer_after_minutes: number;
+          pricing_unit: string;
+          minimum_hours: number | null;
+          pricing_unit_label: string | null;
           active: boolean;
           sort: number;
           created_at: string;
@@ -196,6 +199,9 @@ export interface Database {
           deposit_cents?: number;
           buffer_before_minutes?: number;
           buffer_after_minutes?: number;
+          pricing_unit?: string;
+          minimum_hours?: number | null;
+          pricing_unit_label?: string | null;
           active?: boolean;
           sort?: number;
           created_at?: string;
@@ -212,6 +218,9 @@ export interface Database {
           deposit_cents?: number;
           buffer_before_minutes?: number;
           buffer_after_minutes?: number;
+          pricing_unit?: string;
+          minimum_hours?: number | null;
+          pricing_unit_label?: string | null;
           active?: boolean;
           sort?: number;
           created_at?: string;
@@ -973,12 +982,67 @@ export interface Database {
           p_public_key: string;
           p_service_id: string;
           p_date: string; // 'YYYY-MM-DD'
+          /** Selected add-ons: they extend the job, so they change which slots fit. */
+          p_addon_ids?: string[];
         };
         Returns: {
           slot_start: string;
           slot_end: string;
           employee_id: string;
         }[];
+      };
+      // Onboarding persistence + readiness (0009_onboarding_upsert.sql).
+      // The tenant is taken from auth_tenant() inside each function, never
+      // from a parameter, so there is no cross-tenant surface.
+      onboarding_save_catalog: {
+        Args: {
+          p_services: Json;
+          p_addons?: Json;
+        };
+        Returns: {
+          service_ids: string[];
+          deactivated: number;
+          removed: number;
+        };
+      };
+      onboarding_save_team: {
+        Args: {
+          p_owner_bookable: boolean;
+          p_owner_color: string;
+          p_members?: Json;
+        };
+        Returns: {
+          deactivated: number;
+          removed: number;
+        };
+      };
+      onboarding_readiness: {
+        Args: Record<string, never>;
+        Returns: {
+          booking_ready: boolean;
+          payment_ready: boolean;
+          counts: Record<string, number>;
+          blockers: string[];
+        };
+      };
+      booking_duration_minutes: {
+        Args: {
+          p_service_id: string;
+          p_tenant_id: string;
+          p_addon_ids: string[];
+        };
+        Returns: number;
+      };
+      booking_conflicts: {
+        Args: {
+          p_employee_id: string;
+          p_start: string;
+          p_end: string;
+          p_buffer_before_minutes: number;
+          p_buffer_after_minutes: number;
+          p_ignore_booking_id?: string | null;
+        };
+        Returns: boolean;
       };
       create_widget_booking: {
         Args: {

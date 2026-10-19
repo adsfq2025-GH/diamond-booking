@@ -389,6 +389,9 @@ export const getServices = cache(async (): Promise<ServiceView[]> => {
     depositCents: s.deposit_cents,
     bufferBefore: s.buffer_before_minutes,
     bufferAfter: s.buffer_after_minutes,
+    pricingModel: (s.pricing_unit ?? "flat") as ServiceView["pricingModel"],
+    minimumHours: s.minimum_hours,
+    pricingUnitLabel: s.pricing_unit_label,
     active: s.active,
     addons: addons
       .filter((a) => a.service_id === s.id)

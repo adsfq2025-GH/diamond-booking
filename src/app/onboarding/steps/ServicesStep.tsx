@@ -23,6 +23,7 @@ function blankService(): ServiceInput {
     localId: nextLocalId(),
     name: "",
     category: "",
+    duration_minutes: 120,
     price_cents: 0,
     deposit_cents: 0,
     buffer_before_minutes: 0,
@@ -59,19 +60,22 @@ function dollarsToCents(raw: string): number {
 
 export function ServicesStep({
   value,
+  savedAddons,
   industry,
   busy,
   onSubmit,
   onBack,
 }: {
   value: ServiceInput[];
+  /** Saved extras, so resuming the wizard does not drop them. */
+  savedAddons?: GlobalAddonInput[];
   industry: string;
   busy: boolean;
-  onSubmit: (next: ServiceInput[]) => void;
+  onSubmit: (next: ServiceInput[], addons: GlobalAddonInput[]) => void;
   onBack: () => void;
 }) {
   const [services, setServices] = useState<ServiceInput[]>(value);
-  const [addons, setAddons] = useState<GlobalAddonInput[]>([]);
+  const [addons, setAddons] = useState<GlobalAddonInput[]>(savedAddons ?? []);
   const [error, setError] = useState<string | null>(null);
 
   const templates = templatesForIndustry(industry);
@@ -85,6 +89,7 @@ export function ServicesStep({
         localId: nextLocalId(),
         name: t.name,
         category: t.category,
+        duration_minutes: t.duration_minutes,
         price_cents: t.price_cents,
         deposit_cents: t.deposit_cents,
         buffer_before_minutes: t.buffer_before_minutes,
@@ -128,7 +133,10 @@ export function ServicesStep({
       setError("Hourly services need a minimum hours value greater than 0.");
       return;
     }
-    onSubmit(named);
+    onSubmit(
+      named,
+      addons.filter((a) => a.name.trim().length > 0),
+    );
   };
 
   return (
@@ -175,7 +183,7 @@ export function ServicesStep({
                   <span aria-hidden>{added ? "✓" : "+"}</span>
                   {t.name}
                   <span className={cn("font-normal", added ? "text-success-700/80" : "text-ink-faint")}>
-                    {Math.round((t.duration_minutes / 60) * 10) / 10}h · {formatPrice(t.price_cents)}
+                    {formatDuration(t.duration_minutes)} · {formatPrice(t.price_cents)}
                   </span>
                 </button>
               );
@@ -243,7 +251,7 @@ export function ServicesStep({
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 min-[641px]:col-span-2 min-[641px]:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 min-[641px]:col-span-2 min-[641px]:grid-cols-3">
                 <div>
                   <Label htmlFor={`${s.localId}-pricing-type`}>Pricing unit</Label>
                   <select
@@ -285,6 +293,37 @@ export function ServicesStep({
                     onChange={(e) => update(s.localId, { minimum_hours: Number.parseFloat(e.target.value) || 0 })}
                     className={inputBase}
                   />
+                </div>
+                <div>
+                  <Label
+                    htmlFor={`${s.localId}-duration`}
+                    hint={s.pricing_unit === "hourly" ? "From minimum hours" : "Minutes"}
+                  >
+                    Time on site
+                  </Label>
+                  <input
+                    id={`${s.localId}-duration`}
+                    type="number"
+                    min={15}
+                    step={15}
+                    disabled={s.pricing_unit === "hourly"}
+                    value={
+                      s.pricing_unit === "hourly"
+                        ? Math.max(15, Math.round((s.minimum_hours ?? 1) * 60))
+                        : (s.duration_minutes ?? "")
+                    }
+                    placeholder="120"
+                    onChange={(e) =>
+                      update(s.localId, {
+                        duration_minutes: Number.parseInt(e.target.value, 10) || 0,
+                      })
+                    }
+                    className={inputBase}
+                  />
+                  <p className="mt-1 text-[0.72rem] leading-[1.45] text-ink-faint">
+                    How long the job blocks the calendar. This is what availability
+                    is calculated from.
+                  </p>
                 </div>
                 <div>
                   <Label htmlFor={`${s.localId}-custom-unit`} hint="Optional">
@@ -390,7 +429,7 @@ export function ServicesStep({
 
         {addons.length === 0 ? (
           <div className="rounded-[12px] border border-dashed border-line-strong bg-surface-alt/50 px-4 py-5 text-[0.82rem] text-ink-faint">
-            No add-ons yet — add optional extras like inside fridge, oven cleaning, blinds, or pet hair treatment.
+            No add-ons yet — add optional extras like inside fridge, oven cleaning, blinds, or pet hair treatment. Give each one the extra minutes it takes so availability stays accurate.
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -406,7 +445,7 @@ export function ServicesStep({
                     Remove
                   </button>
                 </div>
-                <div className="grid gap-3 min-[641px]:grid-cols-[minmax(0,1fr),140px]">
+                <div className="grid gap-3 min-[641px]:grid-cols-[minmax(0,1fr),120px,120px]">
                   <input
                     type="text"
                     placeholder="Inside fridge"
@@ -419,11 +458,31 @@ export function ServicesStep({
                     type="number"
                     min={0}
                     step={0.01}
-                    placeholder="0"
+                    placeholder="Price $"
                     value={a.price_cents ? a.price_cents / 100 : ""}
                     onChange={(e) => updateAddon(a.localId, { price_cents: dollarsToCents(e.target.value) })}
                     className={inputBase}
-                    aria-label="Add-on price"
+                    aria-label="Add-on price in dollars"
+                  />
+                  {/*
+                    Extra minutes. Without this the extra was free in TIME: the
+                    booking extended the job but availability did not, so
+                    customers were offered start times that no longer fitted.
+                    Zero is legitimate — plenty of extras take no longer.
+                  */}
+                  <input
+                    type="number"
+                    min={0}
+                    step={5}
+                    placeholder="Extra min"
+                    value={a.duration_minutes ? a.duration_minutes : ""}
+                    onChange={(e) =>
+                      updateAddon(a.localId, {
+                        duration_minutes: Number.parseInt(e.target.value, 10) || 0,
+                      })
+                    }
+                    className={inputBase}
+                    aria-label="Extra minutes this add-on takes"
                   />
                 </div>
               </div>

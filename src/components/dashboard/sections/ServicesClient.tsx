@@ -23,7 +23,7 @@ const emptyDraft: ServiceDraft = {
   durationMinutes: 60,
   priceCents: 0,
   depositCents: 0,
-  pricingModel: "fixed",
+  pricingModel: "flat",
   minimumHours: 0,
   bufferAfter: 15,
   description: "",
@@ -38,8 +38,9 @@ function viewToDraft(s: ServiceView): ServiceDraft {
     durationMinutes: s.durationMinutes,
     priceCents: s.priceCents,
     depositCents: s.depositCents,
-    pricingModel: "fixed",
-    minimumHours: 0,
+    pricingModel: s.pricingModel,
+    minimumHours: s.minimumHours ?? 0,
+    pricingUnitLabel: s.pricingUnitLabel ?? "",
     bufferAfter: s.bufferAfter,
     description: s.description ?? "",
     addons: s.addons.map((a) => ({
@@ -91,6 +92,9 @@ export function ServicesClient({
       depositCents: draft.depositCents,
       bufferBefore: 0,
       bufferAfter: draft.bufferAfter,
+      pricingModel: (draft.pricingModel === "fixed" ? "flat" : draft.pricingModel ?? "flat"),
+      minimumHours: draft.pricingModel === "hourly" ? draft.minimumHours ?? null : null,
+      pricingUnitLabel: draft.pricingUnitLabel?.trim() || null,
       active: services.find((s) => s.id === draft.id)?.active ?? true,
       addons: draft.addons.map((a, i) => ({
         id: a.id ?? `local-a-${i}`,
@@ -359,10 +363,10 @@ function ServiceModal({
             <select
               id="svc-pricing-model"
               className={inputBase}
-              value={d.pricingModel ?? "fixed"}
+              value={d.pricingModel ?? "flat"}
               onChange={(e) => set("pricingModel", e.target.value as ServiceDraft["pricingModel"])}
             >
-              <option value="fixed">Flat rate</option>
+              <option value="flat">Flat rate</option>
               <option value="hourly">Per hour</option>
               <option value="square_foot">Per square foot</option>
             </select>
