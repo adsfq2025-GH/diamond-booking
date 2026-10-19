@@ -107,7 +107,9 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
   elite: {
     tier: "elite",
     name: "Elite",
-    priceMonthly: 129.99,
+    // Matches the Stripe Price that STRIPE_PRICE_ELITE points at. Change both
+    // together, or stripePriceProblems() will report a blocker.
+    priceMonthly: 129,
     priceYearly: 1200,
     description: "Full platform power for established operations.",
     maxEmployees: null,
