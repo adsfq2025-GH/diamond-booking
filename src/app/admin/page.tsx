@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireRole } from "@/lib/auth";
 import { getAdminData, getPlatformHealth } from "@/lib/portal/admin-data";
-import { configProblems } from "@/lib/config-check";
+import { configProblems, stripePriceProblems } from "@/lib/config-check";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { AdminClient } from "@/components/portal/AdminClient";
 
@@ -11,8 +11,14 @@ export default async function AdminPage(props: PageProps<"/admin">) {
   const profile = await requireRole("super_admin");
   const searchParams = await props.searchParams;
   const tab = typeof searchParams.tab === "string" ? searchParams.tab : undefined;
-  const [data, health] = await Promise.all([getAdminData(), getPlatformHealth()]);
-  const problems = configProblems();
+  // The Stripe comparison is a network call; it must never stop the page
+  // rendering, so a failure degrades to no extra problems rather than an error.
+  const [data, health, priceProblems] = await Promise.all([
+    getAdminData(),
+    getPlatformHealth(),
+    stripePriceProblems().catch(() => []),
+  ]);
+  const problems = [...configProblems(), ...priceProblems];
 
   // Platform-level email sender (env-configured), shown read-only in the console.
   const platformEmail =

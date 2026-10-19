@@ -20,7 +20,7 @@ import {
 } from "../auth-ui";
 import { signUp, type AuthFormState } from "@/lib/actions/auth";
 import { passwordScore } from "@/lib/password";
-import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
 import { cn } from "@/lib/cn";
 
 const industries = [
@@ -340,7 +340,7 @@ export function SignupForm() {
                     </span>
                   </div>
                   <p className="font-instrument mt-0.5 text-[1.15rem] leading-none font-semibold text-ink">
-                    ${p.priceMonthly}
+                    {formatPlanPrice(p.priceMonthly)}
                     <span className="text-[0.68rem] font-medium text-ink-faint">/mo</span>
                   </p>
                   <p className="mt-1.5 text-[0.7rem] leading-[1.45] text-ink-faint">{p.description}</p>

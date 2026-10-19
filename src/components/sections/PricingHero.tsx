@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { SectionHeading, Em } from "@/components/ui/SectionHeading";
 import { Reveal } from "@/components/motion/Reveal";
 import { Stagger, StaggerItem } from "@/components/motion/Stagger";
-import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice, yearlySaving } from "@/lib/plans";
 import { cn } from "@/lib/cn";
 
 /**
@@ -14,10 +14,22 @@ import { cn } from "@/lib/cn";
  * + the three tiers from src/lib/plans.ts, in the landing card style.
  */
 
-function yearlyMonthlyEquivalent(monthly: number) {
-  // Yearly = 10 × monthly (2 months free); shown as a monthly equivalent.
-  return Math.round((monthly * 10) / 12);
+/**
+ * Monthly equivalent of the REAL yearly price.
+ *
+ * This used to be Math.round(monthly * 10 / 12) with a blanket "2 months free"
+ * claim, which matched none of the actual Stripe yearly prices — Starter is
+ * 14% off, Professional 29%, Elite 23%. Every figure here now comes from the
+ * catalog, which carries the real amounts.
+ */
+function yearlyMonthlyEquivalent(yearlyTotal: number) {
+  return yearlyTotal / 12;
 }
+
+/** The best yearly discount across the tiers, for the toggle badge. */
+const MAX_YEARLY_SAVING = Math.round(
+  Math.max(...PLAN_ORDER.map((t) => yearlySaving(t))) * 100,
+);
 
 function Check({ gold = false }: { gold?: boolean }) {
   return (
@@ -94,7 +106,7 @@ export function PricingHero() {
                           : "bg-gold-100 text-gold-700",
                       )}
                     >
-                      2 months free
+                      Save up to {MAX_YEARLY_SAVING}%
                     </span>
                   )}
                 </button>
@@ -108,7 +120,7 @@ export function PricingHero() {
             const plan = PLANS[tier];
             const popular = tier === "professional";
             const price = yearly
-              ? yearlyMonthlyEquivalent(plan.priceMonthly)
+              ? yearlyMonthlyEquivalent(plan.priceYearly)
               : plan.priceMonthly;
             return (
               <StaggerItem
@@ -138,7 +150,7 @@ export function PricingHero() {
                     {plan.name}
                   </div>
                   <div className="font-instrument text-[3rem] leading-none font-bold tracking-[-0.04em]">
-                    ${price}
+                    {formatPlanPrice(price)}
                     <small
                       className={cn(
                         "ml-0.5 text-[0.9rem] font-medium tracking-normal",
@@ -155,8 +167,18 @@ export function PricingHero() {
                     )}
                   >
                     {yearly
-                      ? `Billed yearly — $${(plan.priceMonthly * 10).toLocaleString()}/yr (2 months free)`
+                      ? `Billed yearly — ${formatPlanPrice(plan.priceYearly)}/yr (save ${Math.round(yearlySaving(tier) * 100)}%)`
                       : "Billed monthly · cancel anytime"}
+                    {/*
+                      Annual checkout is not wired: startCheckout only ever
+                      uses the monthly price id. Rather than let a customer
+                      pick yearly and be charged monthly, say how it works.
+                    */}
+                    {yearly && (
+                      <span className="mt-1 block">
+                        Annual billing is arranged with our team after signup.
+                      </span>
+                    )}
                   </div>
                   <p
                     className={cn(

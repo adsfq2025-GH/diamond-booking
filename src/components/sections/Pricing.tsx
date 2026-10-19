@@ -4,7 +4,7 @@ import { SectionHeading, Em } from "@/components/ui/SectionHeading";
 import { Reveal } from "@/components/motion/Reveal";
 import { Stagger, StaggerItem } from "@/components/motion/Stagger";
 import { cn } from "@/lib/cn";
-import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
 
 /**
  * Plans are DERIVED from the typed catalog in lib/plans.ts (A24).
@@ -30,7 +30,7 @@ const plans: Plan[] = PLAN_ORDER.map((tier) => {
   const plan = PLANS[tier];
   return {
     name: plan.name,
-    price: `$${plan.priceMonthly}`,
+    price: formatPlanPrice(plan.priceMonthly),
     desc: plan.description,
     features: plan.highlights,
     // The middle tier is the one we recommend.

@@ -43,19 +43,35 @@ You need:
      restore into staging; or
    - `pg_dump` / `pg_restore` using the connection strings from
      **Project Settings → Database**.
-3. Confirm the restore: in the staging **SQL editor**, run
+3. Confirm the restore, and — more important — **find out which migrations are
+   actually applied**. Run `supabase/tests/00_migration_state.sql` in the
+   staging SQL editor. It is read-only and prints one row per migration with
+   `APPLIED` / `PARTIAL` / `NOT APPLIED` and exactly which objects are missing.
 
-   ```sql
-   select
-     (select count(*) from public.tenants)  as tenants,
-     (select count(*) from public.bookings) as bookings,
-     (select max(version) from supabase_migrations.schema_migrations) as last_migration;
-   ```
+   **Do not trust `supabase_migrations.schema_migrations` for this.** That table
+   is only written by `supabase db push`. If the migrations were applied by
+   pasting them into the SQL editor — which is what this repo's own docs used
+   to tell you to do — it is empty or stale and will report nothing applied
+   when most of it is. `00_migration_state.sql` probes for the objects instead,
+   which is the ground truth.
 
-   You should see your real row counts and `0006` (or whatever production is
-   actually on) as the last migration. **If `last_migration` is not what you
-   expect, stop** — you need to know your true starting point before applying
-   anything.
+   **Start at the lowest migration that is not `APPLIED`, not at 0007.**
+   Applying a migration over a gap fails exactly the way you would expect:
+   0007 touches `google_calendar_connections`, which 0006 creates, so on a
+   database that stopped at 0005 it dies with
+   `relation "public.google_calendar_connections" does not exist`.
+
+   Known dependencies across the gap:
+
+   | Migration | Needs | Because |
+   |---|---|---|
+   | `0007` | `0006` | re-writes the `google_calendar_connections` policies |
+   | `0009` | `0006` | `onboarding_readiness()` reads `tenants.stripe_charges_enabled` |
+   | the app | `0005` | recurring bookings read `bookings.recurrence_group_id` |
+   | the app | `0006` | the booking flow selects `tenants.stripe_charges_enabled`, and reminders need `booking_reminders` |
+
+   `0008` and `0010` have no dependency on `0005`/`0006`, but apply everything
+   in order anyway — there is no reason not to.
 
 > **Double-check you are in staging.** Every destructive step below is harmless
 > on staging and expensive on production. The project name is in the top-left of
@@ -148,6 +164,7 @@ Run each in the staging SQL editor and **read the NOTICE output**:
 
 | File | Proves |
 |---|---|
+| `00_migration_state.sql` | which migrations are really applied (read-only; run it first, and again after step 2) |
 | `01_security.sql` | A01 no self-promotion or tenant hop · A02 credentials unreachable · A04 tokens own-row only · cross-tenant isolation |
 | `02_booking.sql` | A09 add-on duration honoured · **A10 the 11:30 buffer case** · A11 capacity survives display collapse · A28 distinguishable errors |
 | `03_data_and_money.sql` | A13 re-running onboarding destroys nothing · A21 readiness · A07 payment idempotency · A16 coupon pricing and redemption limits |

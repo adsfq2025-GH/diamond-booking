@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { connectStripeAccount, refreshStripeConnectStatus } from "@/lib/actions/billing";
 import { money, shortDate, timeOfDay } from "@/lib/format";
-import { PLANS } from "@/lib/plans";
+import { PLANS, formatPlanPrice } from "@/lib/plans";
 import type { PaymentsData } from "@/lib/dashboard/types";
 import { Icon } from "../icons";
 import { PaymentStatusBadge, Panel, PanelHeader, StatCard } from "../ui";
@@ -137,7 +137,7 @@ export function PaymentsClient({
                   <p className="text-[0.8rem] text-ink-faint">{plan.description}</p>
                 </div>
                 <p className="font-instrument text-[1.5rem] font-semibold text-ink">
-                  ${sub.priceMonthly}
+                  {formatPlanPrice(sub.priceMonthly)}
                   <span className="text-[0.8rem] font-medium text-ink-faint">/mo</span>
                 </p>
               </div>

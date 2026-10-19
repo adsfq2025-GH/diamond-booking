@@ -12,6 +12,7 @@ Each file:
 
 | File | Findings covered |
 |---|---|
+| `00_migration_state.sql` | none — a read-only probe of which migrations are actually applied. Run it before changing any database. |
 | `01_security.sql` | A01 privilege escalation · A02 tenant credentials · A04 OAuth tokens · cross-tenant isolation |
 | `02_booking.sql` | A09 add-on duration · A10 buffers (both sides) · A11 capacity vs display · A28 error codes |
 | `03_data_and_money.sql` | A13 onboarding data loss · A21 readiness · A07 payment idempotency · A16 coupon pricing and limits |

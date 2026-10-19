@@ -1,7 +1,7 @@
 import { Container } from "@/components/ui/Container";
 import { SectionHeading, Em } from "@/components/ui/SectionHeading";
 import { Reveal } from "@/components/motion/Reveal";
-import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
 import { cn } from "@/lib/cn";
 
 /**
@@ -165,7 +165,7 @@ export function ComparisonTable() {
                         )}
                       </div>
                       <div className="font-instrument mt-1 text-[1.1rem] font-bold tracking-[-0.02em] text-ink">
-                        ${plan.priceMonthly}
+                        {formatPlanPrice(plan.priceMonthly)}
                         <small className="text-[0.66rem] font-medium text-ink-faint">/mo</small>
                       </div>
                     </th>

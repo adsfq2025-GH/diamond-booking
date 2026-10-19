@@ -1,5 +1,5 @@
 import "server-only";
-import { PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
 
 /**
  * Configuration self-check (A06).
@@ -143,4 +143,94 @@ export function configProblems(): ConfigProblem[] {
 /** True when nothing is outright broken. */
 export function configIsLaunchable(): boolean {
   return configProblems().every((p) => p.severity !== "blocker");
+}
+
+/**
+ * Compare what the app DISPLAYS against what Stripe will actually CHARGE.
+ *
+ * This is the check that would have caught the launch-blocking version of this
+ * bug: the catalog said Professional was $59 and Elite $119, while the Stripe
+ * Prices those tiers pointed at were $69.99 and $129.00. A customer would have
+ * been shown one price and billed another, and nothing in the product would
+ * ever have mentioned it.
+ *
+ * Network call, so it is deliberately NOT part of configProblems(): the admin
+ * health tab awaits it separately and the page still renders if Stripe is
+ * unreachable. Unreachable is a warning, a mismatch is a blocker.
+ */
+export async function stripePriceProblems(): Promise<ConfigProblem[]> {
+  const problems: ConfigProblem[] = [];
+  const secret = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!secret) return problems; // already reported by configProblems()
+
+  for (const tier of PLAN_ORDER) {
+    const envName = `STRIPE_PRICE_${tier.toUpperCase()}`;
+    const priceId = process.env[envName]?.trim();
+    if (!priceId) continue; // already reported as a blocker
+
+    try {
+      const res = await fetch(`https://api.stripe.com/v1/prices/${encodeURIComponent(priceId)}`, {
+        headers: { Authorization: `Bearer ${secret}` },
+        // The dashboard should not hammer Stripe on every render.
+        next: { revalidate: 300 },
+      });
+      if (!res.ok) {
+        problems.push({
+          severity: res.status === 404 ? "blocker" : "warning",
+          area: "Stripe prices",
+          message:
+            res.status === 404
+              ? `${envName} points at ${priceId}, which does not exist in this Stripe account. Checkout for ${PLANS[tier].name} will fail.`
+              : `Could not read the ${PLANS[tier].name} price from Stripe (HTTP ${res.status}); displayed and charged amounts are unverified.`,
+        });
+        continue;
+      }
+
+      const price = (await res.json()) as {
+        unit_amount: number | null;
+        currency?: string;
+        active?: boolean;
+        recurring?: { interval?: string } | null;
+      };
+      const charged = (price.unit_amount ?? 0) / 100;
+      const shown = PLANS[tier].priceMonthly;
+
+      if (Math.abs(charged - shown) > 0.005) {
+        problems.push({
+          severity: "blocker",
+          area: "Stripe prices",
+          message: `${PLANS[tier].name}: the app shows ${formatPlanPrice(shown)}/month but Stripe charges $${charged.toFixed(2)}. A customer would be billed an amount they were never shown. Fix lib/plans.ts or the Stripe Price so they agree.`,
+        });
+      }
+      if (price.active === false) {
+        problems.push({
+          severity: "blocker",
+          area: "Stripe prices",
+          message: `${PLANS[tier].name}: the Stripe Price ${priceId} is archived, so checkout will fail.`,
+        });
+      }
+      if (price.recurring?.interval && price.recurring.interval !== "month") {
+        problems.push({
+          severity: "blocker",
+          area: "Stripe prices",
+          message: `${PLANS[tier].name}: ${envName} points at a ${price.recurring.interval}ly price, but it is used as the monthly plan.`,
+        });
+      }
+      if (price.currency && price.currency !== "usd") {
+        problems.push({
+          severity: "warning",
+          area: "Stripe prices",
+          message: `${PLANS[tier].name}: the Stripe Price is in ${price.currency.toUpperCase()} while the app renders US dollars.`,
+        });
+      }
+    } catch {
+      problems.push({
+        severity: "warning",
+        area: "Stripe prices",
+        message: `Could not reach Stripe to verify the ${PLANS[tier].name} price; displayed and charged amounts are unverified.`,
+      });
+    }
+  }
+
+  return problems;
 }

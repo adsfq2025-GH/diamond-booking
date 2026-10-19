@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
-import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
 import { connectStripeAccount, openBillingPortal, refreshStripeConnectStatus, startCheckout } from "@/lib/actions/billing";
 import {
   saveBookingSettings,
@@ -673,7 +673,7 @@ function BillingTab({ plan }: { plan: PlanTier }) {
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
           <div>
             <p className="font-display text-[1.3rem] font-semibold text-ink">{PLANS[plan].name}</p>
-            <p className="text-[0.82rem] text-ink-faint">${PLANS[plan].priceMonthly}/month · billed monthly</p>
+            <p className="text-[0.82rem] text-ink-faint">{formatPlanPrice(PLANS[plan].priceMonthly)}/month · billed monthly</p>
           </div>
           <GhostBtn onClick={portal}>{busy === "portal" ? "Opening…" : "Manage payment method"}</GhostBtn>
         </div>
@@ -687,7 +687,7 @@ function BillingTab({ plan }: { plan: PlanTier }) {
             <Panel key={tier} className={cn("flex flex-col p-5", current && "ring-2 ring-blue-600")}>
               <p className="font-display text-[1.05rem] font-semibold text-ink">{p.name}</p>
               <p className="font-instrument mt-1 text-[1.6rem] font-semibold text-ink">
-                ${p.priceMonthly}
+                {formatPlanPrice(p.priceMonthly)}
                 <span className="text-[0.8rem] font-medium text-ink-faint">/mo</span>
               </p>
               <ul className="mt-4 flex-1 space-y-1.5">
