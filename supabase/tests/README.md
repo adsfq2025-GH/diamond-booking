@@ -13,6 +13,8 @@ Each file:
 | File | Findings covered |
 |---|---|
 | `00_migration_state.sql` | none — a read-only probe of which migrations are actually applied. Run it before changing any database. |
+| `06_credential_status.sql` | none — one read-only row per tenant answering "did 0007 lose its mail credentials, and can I get them back?". Start here if 0007 was applied to a database with real tenants. |
+| `05_recover_credentials.sql` | none — recovers credentials from the audit trail when `06` says `recoverable`, then redacts the leftover plaintext copy. Part A is read-only; B and C are commented out until you want them. |
 | `04_production_integrity.sql` | none — a read-only post-migration check for a database that has already had 0007–0010 applied: did the credential move land, what did the payments dedupe do, has anyone tried to change a role, and what is broken while the SQL is ahead of the deployed code. |
 | `01_security.sql` | A01 privilege escalation · A02 tenant credentials · A04 OAuth tokens · cross-tenant isolation |
 | `02_booking.sql` | A09 add-on duration · A10 buffers (both sides) · A11 capacity vs display · A28 error codes |
