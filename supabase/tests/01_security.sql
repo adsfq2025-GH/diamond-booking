@@ -189,23 +189,42 @@ end $$;
 -- ============================================================
 -- A02 — tenant credentials are unreachable from a tenant member
 -- ============================================================
+-- tenant_secrets is protected two ways, and the stronger one raises rather
+-- than returning nothing: 0007 does `revoke all ... from anon, authenticated`,
+-- so a client role has no table privilege at all and a SELECT fails with
+-- insufficient_privilege (42501) BEFORE RLS is consulted. An earlier version of
+-- this check asserted "returns 0 rows" and therefore aborted on the better
+-- outcome. Both results pass; the notice records which one happened.
+--
+-- If you ever see the Postgres HINT "GRANT SELECT ON public.tenant_secrets TO
+-- authenticated" — do not follow it. That is precisely the A02 exposure.
 do $$
 declare
   v_cust uuid := (select v from _ids where k = 'cust_a');
   v_emp uuid := (select v from _ids where k = 'emp_a');
   v_t1 uuid := (select v from _ids where k = 't1');
   v_rows int;
+  v_denied boolean;
   v_settings jsonb;
 begin
   -- as the CUSTOMER
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_cust, 'role', 'authenticated')::text, true);
 
-  select count(*) into v_rows from public.tenant_secrets;
-  if v_rows <> 0 then
+  v_denied := false;
+  v_rows := -1;
+  begin
+    select count(*) into v_rows from public.tenant_secrets;
+  exception when insufficient_privilege then
+    v_denied := true;
+  end;
+  if not v_denied and v_rows <> 0 then
     raise exception 'FAIL A02.1: a customer read % row(s) from tenant_secrets', v_rows;
   end if;
-  raise notice 'PASS A02.1: customer reads 0 rows from tenant_secrets';
+  raise notice 'PASS A02.1: customer cannot read tenant_secrets (%)',
+    case when v_denied
+      then 'table privilege revoked outright — stronger than an RLS filter'
+      else 'RLS returned 0 rows' end;
 
   select settings into v_settings from public.tenants where id = v_t1;
   if v_settings ? 'email' then
@@ -217,11 +236,37 @@ begin
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_emp, 'role', 'authenticated')::text, true);
 
-  select count(*) into v_rows from public.tenant_secrets;
-  if v_rows <> 0 then
+  v_denied := false;
+  v_rows := -1;
+  begin
+    select count(*) into v_rows from public.tenant_secrets;
+  exception when insufficient_privilege then
+    v_denied := true;
+  end;
+  if not v_denied and v_rows <> 0 then
     raise exception 'FAIL A02.3: an employee read % row(s) from tenant_secrets', v_rows;
   end if;
-  raise notice 'PASS A02.3: employee reads 0 rows from tenant_secrets';
+  raise notice 'PASS A02.3: employee cannot read tenant_secrets (%)',
+    case when v_denied
+      then 'table privilege revoked outright'
+      else 'RLS returned 0 rows' end;
+
+  -- A02.4 — writing is refused too, so a client cannot plant a credential
+  -- somewhere only the service role is supposed to reach.
+  v_denied := false;
+  begin
+    insert into public.tenant_secrets (tenant_id, email)
+    values (v_t1, '{"provider":"smtp"}'::jsonb)
+    on conflict (tenant_id) do update set email = excluded.email;
+  exception when insufficient_privilege or check_violation then
+    v_denied := true;
+  when others then
+    v_denied := true;   -- any refusal is a pass; only success is a failure
+  end;
+  if not v_denied then
+    raise exception 'FAIL A02.4: an employee WROTE to tenant_secrets';
+  end if;
+  raise notice 'PASS A02.4: writing to tenant_secrets is refused';
 end $$;
 
 -- ============================================================

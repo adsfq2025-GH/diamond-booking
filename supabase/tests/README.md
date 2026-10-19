@@ -30,6 +30,19 @@ Or paste into the Supabase SQL editor. **Read the NOTICE output** — a run with
 no notices means notices are being suppressed, not that everything passed; use
 `psql` in that case.
 
+## A privilege error is not always a failure
+
+`tenant_secrets` (0007) and `contact_submissions` (0010) have **both** RLS with
+no policies AND `revoke all ... from anon, authenticated`. The revoke is the
+stronger guard and it behaves differently: a client-role SELECT raises
+`42501 permission denied` *before* RLS is consulted, rather than returning zero
+rows. A check written as "expect 0 rows" therefore aborts on the better
+outcome — which is exactly what A02 did until it was fixed to accept either.
+
+If Postgres shows you the hint
+`GRANT SELECT ON public.tenant_secrets TO authenticated` — **do not follow it.**
+That grant is the A02 credential exposure.
+
 ## Two things to know before trusting a result
 
 1. **`01_security.sql` check 0 must pass.** The SQL editor runs as `postgres`,
