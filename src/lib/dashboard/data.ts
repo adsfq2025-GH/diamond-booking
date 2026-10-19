@@ -501,6 +501,7 @@ export const getTeam = cache(async (): Promise<import("./types").EmployeeView[]>
       color: e.color ?? "#7c8fa3",
       active: e.active,
       invited: !e.profile_id && Boolean(e.invite_email),
+      profileLinked: Boolean(e.profile_id),
       hourlyRateCents: e.hourly_rate_cents,
       commissionPct: e.commission_pct,
       jobsThisMonth: monthJobs.length,

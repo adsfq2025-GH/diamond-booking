@@ -143,7 +143,10 @@ export interface EmployeeView {
   email: string | null;
   color: string;
   active: boolean;
+  /** An invite_email is recorded. Not the same as having been invited. */
   invited: boolean;
+  /** Has a real account bound to this record, so they can actually sign in. */
+  profileLinked: boolean;
   hourlyRateCents: number | null;
   commissionPct: number | null;
   jobsThisMonth: number;

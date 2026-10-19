@@ -50,6 +50,8 @@ type ButtonProps = {
   children: React.ReactNode;
   onClick?: () => void;
   type?: "button" | "submit";
+  /** Ignored for link buttons — an anchor has no disabled state. */
+  disabled?: boolean;
 };
 
 export function Button({
@@ -61,8 +63,15 @@ export function Button({
   children,
   onClick,
   type = "button",
+  disabled = false,
 }: ButtonProps) {
-  const cls = cn(base, sizes[size], variants[variant], className);
+  const cls = cn(
+    base,
+    sizes[size],
+    variants[variant],
+    disabled && "pointer-events-none cursor-not-allowed opacity-60",
+    className,
+  );
   const content = (
     <>
       {children}
@@ -85,7 +94,7 @@ export function Button({
     );
   }
   return (
-    <button type={type} onClick={onClick} className={cls}>
+    <button type={type} onClick={onClick} disabled={disabled} className={cls}>
       {content}
     </button>
   );

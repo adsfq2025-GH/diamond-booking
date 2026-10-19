@@ -295,3 +295,84 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/**
+ * Notify the platform's own inbox that a marketing contact form came in (A15).
+ *
+ * Goes to SMTP_FROM / RESEND_FROM_EMAIL — whichever platform sender is
+ * configured — with no tenant involved. Returns a skipped result rather than
+ * throwing when nothing is configured: the submission is already stored, so
+ * the lead is not lost either way.
+ */
+export async function sendContactNotification(d: {
+  name: string;
+  email: string;
+  business: string;
+  message: string;
+}): Promise<SendResult> {
+  const to =
+    process.env.SMTP_FROM?.trim() ||
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    process.env.SUPER_ADMIN_EMAIL?.trim();
+  if (!to) {
+    return { ok: false, skipped: true, error: "No platform inbox configured" };
+  }
+
+  const html = shell(
+    "Diamond Booking",
+    "New contact form submission",
+    `
+      <table style="width:100%;border-collapse:collapse">
+        ${detailRow("Name", d.name)}
+        ${detailRow("Email", d.email)}
+        ${detailRow("Business", d.business || "—")}
+      </table>
+      <p style="margin:16px 0 6px;font-size:13px;color:#7c8fa3">Message</p>
+      <p style="margin:0;font-size:15px;white-space:pre-wrap">${escapeHtml(d.message)}</p>
+    `,
+  );
+
+  // Reply-to would be nicer than embedding the address, but the dispatcher's
+  // signature is shared with tenant mail; the address is in the body above.
+  return send(to, `Contact form — ${d.name}`, html);
+}
+
+/** Invitation email for a new teammate (A22). */
+export async function sendTeamInvitation(
+  d: {
+    businessName: string;
+    inviteeName: string;
+    inviteeEmail: string;
+    acceptUrl: string;
+    expiresAt: string;
+  },
+  tenantId: string,
+): Promise<SendResult> {
+  const expires = new Date(d.expiresAt).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const html = shell(
+    d.businessName,
+    "You've been added to the team",
+    `
+      <p style="margin:0 0 16px;font-size:15px">
+        Hi ${escapeHtml(d.inviteeName.split(" ")[0])}, ${escapeHtml(d.businessName)} has
+        added you to their team on Diamond Booking. Accept the invitation to set
+        your working hours and see the jobs assigned to you.
+      </p>
+      <p style="margin:0 0 20px">
+        <a href="${escapeHtml(d.acceptUrl)}"
+           style="display:inline-block;background:#0c2440;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;font-size:15px">
+          Accept invitation
+        </a>
+      </p>
+      <p style="margin:0;font-size:13px;color:#7c8fa3">
+        This link works once and expires on ${escapeHtml(expires)}. Sign in with
+        ${escapeHtml(d.inviteeEmail)} — the invitation is tied to that address.
+      </p>
+    `,
+  );
+  return send(d.inviteeEmail, `${d.businessName} added you to their team`, html, tenantId);
+}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { money } from "@/lib/format";
-import { fetchSlots, submitBooking } from "@/lib/actions/widget";
+import { fetchQuote, fetchSlots, submitBooking, submitInquiry } from "@/lib/actions/widget";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { RECURRENCE_OPTIONS, recurrenceLabel, type RecurrenceRule } from "@/lib/recurrence";
 import type {
@@ -72,6 +72,37 @@ export function BookingFlow({
   }, [service, addons]);
   const priceTotal = (service?.price_cents ?? 0) + addonTotal;
 
+  // Coupon state. The discount is only ever what the SERVER returned — never
+  // computed here — so what the customer sees matches what is charged.
+  const [couponCode, setCouponCode] = useState("");
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponChecking, setCouponChecking] = useState(false);
+
+  async function applyCoupon() {
+    if (!service || !couponCode.trim()) return;
+    setCouponChecking(true);
+    setCouponError(null);
+    const quote = await fetchQuote({
+      publicKey,
+      serviceId: service.id,
+      addonIds: [...addons],
+      couponCode: couponCode.trim(),
+    });
+    setCouponChecking(false);
+    if (!quote) {
+      setCouponError("We couldn't check that code. Please try again.");
+      setCouponDiscount(0);
+      return;
+    }
+    if (quote.couponError) {
+      setCouponError(quote.couponError);
+      setCouponDiscount(0);
+      return;
+    }
+    setCouponDiscount(quote.discountCents);
+  }
+
   return (
     <div
       ref={rootRef}
@@ -134,6 +165,9 @@ export function BookingFlow({
               onSelect={(s) => {
                 setService(s);
                 setAddons(new Set());
+                // A code priced against the old service no longer applies.
+                setCouponDiscount(0);
+                setCouponError(null);
               }}
               onToggleAddon={(id) =>
                 setAddons((prev) => {
@@ -181,6 +215,16 @@ export function BookingFlow({
               customFields={customFields}
               addonNames={service.addons.filter((a) => addons.has(a.id))}
               priceTotal={priceTotal}
+              couponCode={couponCode}
+              couponDiscount={couponDiscount}
+              couponError={couponError}
+              couponChecking={couponChecking}
+              onCouponChange={(code) => {
+                setCouponCode(code);
+                setCouponDiscount(0);
+                setCouponError(null);
+              }}
+              onApplyCoupon={() => void applyCoupon()}
               onChange={setDetails}
               onCustom={(k, v) => setCustom((p) => ({ ...p, [k]: v }))}
               onBack={() => setStep(1)}
@@ -201,6 +245,7 @@ export function BookingFlow({
                     .filter(Boolean)
                     .join(" · ") || null,
                   addonIds: [...addons],
+                  couponCode: couponDiscount > 0 ? couponCode.trim() : null,
                   recurrence,
                   recurrenceUntil: null,
                 });
@@ -356,6 +401,149 @@ function ServiceStep({
   );
 }
 
+/** Shared field styling for the widget's text inputs. */
+const input =
+  "w-full rounded-[10px] border border-line-strong bg-card px-3.5 py-2.5 text-[0.88rem] text-ink placeholder:text-ink-faint/80 focus:outline-none";
+
+/**
+ * Demand capture for a day with no openings. Deliberately framed as a request
+ * rather than a booking, both in the copy and in what it writes: the business
+ * receives an enquiry it must act on, not an implied appointment.
+ */
+function NoSlotsCapture({
+  publicKey,
+  serviceId,
+  accent,
+  requestedDate,
+}: {
+  publicKey: string;
+  serviceId: string;
+  accent: string;
+  requestedDate: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  if (done) {
+    return (
+      <div className="rounded-[10px] border border-success-500/40 bg-success-50 px-4 py-5 text-center text-[0.85rem] text-success-700">
+        <p className="font-semibold">Request sent.</p>
+        <p className="mt-1 text-[0.8rem]">
+          This is not a confirmed appointment — the business will contact you to
+          find a time that works.
+        </p>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <div className="rounded-[10px] border border-dashed border-line-strong px-4 py-6 text-center">
+        <p className="text-[0.82rem] text-ink-faint">
+          No openings this day. Try another date, or ask for a time that suits you.
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-3 rounded-[9px] px-4 py-2 text-[0.82rem] font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ backgroundColor: accent }}
+        >
+          Request another time
+        </button>
+      </div>
+    );
+  }
+
+  const valid = name.trim().length > 0 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+
+  return (
+    <div className="rounded-[10px] border border-line-strong px-4 py-4">
+      <p className="text-[0.82rem] font-semibold text-ink">Ask for a time</p>
+      <p className="mt-1 mb-3 text-[0.74rem] leading-[1.5] text-ink-faint">
+        Leave your details and what suits you. This does not reserve a slot —
+        the business will get back to you.
+      </p>
+      <div className="space-y-2.5">
+        <input
+          className={input}
+          style={focusRing(accent)}
+          placeholder="Full name *"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          className={input}
+          style={focusRing(accent)}
+          type="email"
+          placeholder="Email *"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          className={input}
+          style={focusRing(accent)}
+          type="tel"
+          placeholder="Phone (optional)"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+        />
+        <textarea
+          className={input}
+          style={focusRing(accent)}
+          rows={3}
+          placeholder="Which days or times work for you?"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </div>
+      {error && (
+        <p className="mt-2 text-[0.74rem] text-[#a63d39]" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="flex-none rounded-[9px] border border-line-strong px-3.5 py-2 text-[0.8rem] font-semibold text-ink-muted"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!valid || busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            const result = await submitInquiry({
+              publicKey,
+              serviceId,
+              customerName: name,
+              customerEmail: email,
+              customerPhone: phone || null,
+              requestedDate,
+              notes: notes || null,
+            });
+            setBusy(false);
+            if (result.ok) setDone(true);
+            else setError(result.error);
+          }}
+          className="flex-1 rounded-[9px] px-4 py-2 text-[0.82rem] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: accent }}
+        >
+          {busy ? "Sending…" : "Send request"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- step 2: time ----------
 function TimeStep({
   publicKey,
@@ -450,9 +638,18 @@ function TimeStep({
           ))}
         </div>
       ) : slots.length === 0 ? (
-        <p className="rounded-[10px] border border-dashed border-line-strong px-4 py-6 text-center text-[0.82rem] text-ink-faint">
-          No openings this day. Try another date.
-        </p>
+        /*
+          A full day used to be a dead end: one line of text, no way to express
+          interest, and the customer was simply lost. They can now leave a
+          request — which is stored as an enquiry, reserves nothing and consumes
+          no capacity (A34).
+        */
+        <NoSlotsCapture
+          publicKey={publicKey}
+          serviceId={service.id}
+          accent={accent}
+          requestedDate={dateKey}
+        />
       ) : (
         <div className="grid grid-cols-3 gap-2">
           {slots.map((s) => {
@@ -500,6 +697,12 @@ function DetailsStep({
   customFields,
   addonNames,
   priceTotal,
+  couponCode,
+  couponDiscount,
+  couponError,
+  couponChecking,
+  onCouponChange,
+  onApplyCoupon,
   onChange,
   onCustom,
   onBack,
@@ -517,6 +720,13 @@ function DetailsStep({
   customFields: CustomField[];
   addonNames: Service["addons"];
   priceTotal: number;
+  couponCode: string;
+  /** Verified by the server; 0 until a code is actually accepted. */
+  couponDiscount: number;
+  couponError: string | null;
+  couponChecking: boolean;
+  onCouponChange: (code: string) => void;
+  onApplyCoupon: () => void;
   onChange: (d: typeof details) => void;
   onCustom: (k: string, v: string) => void;
   onBack: () => void;
@@ -534,9 +744,6 @@ function DetailsStep({
     details.address.trim().length > 0 &&
     requiredCustomOk;
 
-  const input =
-    "w-full rounded-[10px] border border-line-strong bg-card px-3.5 py-2.5 text-[0.88rem] text-ink placeholder:text-ink-faint/80 focus:outline-none";
-
   return (
     <div>
       {/* Summary */}
@@ -550,7 +757,52 @@ function DetailsStep({
         {addonNames.length > 0 && (
           <p className="mt-1 text-[0.72rem] text-ink-faint">+ {addonNames.map((a) => a.name).join(", ")}</p>
         )}
-        <p className="mt-2 font-instrument text-[1.05rem] font-semibold text-ink">{money(priceTotal)}</p>
+        {couponDiscount > 0 ? (
+          <>
+            <p className="mt-2 text-[0.78rem] text-ink-faint line-through">{money(priceTotal)}</p>
+            <p className="font-instrument text-[1.05rem] font-semibold text-ink">
+              {money(Math.max(0, priceTotal - couponDiscount))}
+              <span className="ml-2 text-[0.72rem] font-semibold text-success-700">
+                −{money(couponDiscount)} with {couponCode.toUpperCase()}
+              </span>
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 font-instrument text-[1.05rem] font-semibold text-ink">{money(priceTotal)}</p>
+        )}
+      </div>
+
+      {/*
+        Discount code. Validated and priced by the server (quote_booking), and
+        re-validated when the booking is created, so the quoted and charged
+        amounts cannot drift. Coupons used to exist only as dashboard state and
+        had no effect on any price at all.
+      */}
+      <div className="mb-4">
+        <div className="flex gap-2">
+          <input
+            className={input}
+            style={focusRing(accent)}
+            placeholder="Discount code"
+            value={couponCode}
+            aria-label="Discount code"
+            autoCapitalize="characters"
+            onChange={(e) => onCouponChange(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={onApplyCoupon}
+            disabled={couponChecking || couponCode.trim().length === 0}
+            className="flex-none rounded-[10px] border border-line-strong px-3.5 text-[0.8rem] font-semibold text-ink transition-colors hover:border-blue-600 hover:text-blue-600 disabled:opacity-50"
+          >
+            {couponChecking ? "…" : "Apply"}
+          </button>
+        </div>
+        {couponError && (
+          <p className="mt-1.5 text-[0.74rem] text-[#a63d39]" role="alert">
+            {couponError}
+          </p>
+        )}
       </div>
 
       {recurringEnabled && (

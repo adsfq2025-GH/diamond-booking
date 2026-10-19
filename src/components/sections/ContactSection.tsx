@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { submitContactForm } from "@/lib/actions/contact";
 import { Container } from "@/components/ui/Container";
 import { Button } from "@/components/ui/Button";
 import { Eyebrow } from "@/components/ui/Eyebrow";
@@ -101,6 +102,10 @@ export function ContactSection() {
   const [errors, setErrors] = useState<Errors>({});
   const [touched, setTouched] = useState<Partial<Record<keyof Values, boolean>>>({});
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // Bots fill every field they find; people never see this one.
+  const [honeypot, setHoneypot] = useState("");
 
   const set = (key: keyof Values) => (value: string) => {
     const next = { ...values, [key]: value };
@@ -113,12 +118,35 @@ export function ContactSection() {
     setErrors(validate(values));
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  /**
+   * Submit to the server and only claim success if the server says so. This
+   * used to be `if (no client errors) setSent(true)` with no network call at
+   * all, so every enquiry was discarded while the visitor was told it had
+   * been received (A15).
+   */
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate(values);
     setErrors(errs);
     setTouched({ name: true, email: true, business: true, message: true });
-    if (Object.keys(errs).length === 0) setSent(true);
+    if (Object.keys(errs).length > 0) return;
+
+    setSubmitting(true);
+    setFailure(null);
+    const result = await submitContactForm({
+      name: values.name,
+      email: values.email,
+      business: values.business,
+      message: values.message,
+      honeypot,
+    });
+    setSubmitting(false);
+
+    if (result.ok) {
+      setSent(true);
+      return;
+    }
+    setFailure(result.error);
   };
 
   const showError = (key: keyof Values) => touched[key] && errors[key];
@@ -301,8 +329,31 @@ export function ContactSection() {
                   <FieldError id="contact-message-error">{showError("message")}</FieldError>
                 </div>
 
-                <Button type="submit" variant="gold" className="w-full" arrow>
-                  Send message
+                {failure && (
+                  <div
+                    role="alert"
+                    className="mb-4 rounded-[10px] border border-[#e8c0bd] bg-[#fdf6f5] px-4 py-3 text-[0.85rem] text-[#a63d39]"
+                  >
+                    {failure}
+                  </div>
+                )}
+
+                {/* Honeypot: off-screen, not hidden, so bots still fill it. */}
+                <div aria-hidden className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+                  <label htmlFor="contact-company-url">Company URL</label>
+                  <input
+                    id="contact-company-url"
+                    name="company_url"
+                    type="text"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    value={honeypot}
+                    onChange={(e) => setHoneypot(e.target.value)}
+                  />
+                </div>
+
+                <Button type="submit" variant="gold" className="w-full" arrow disabled={submitting}>
+                  {submitting ? "Sending…" : "Send message"}
                 </Button>
                 <p className="mt-4 text-center text-[0.75rem] text-ink-faint">
                   We reply to every message — usually within 4 business hours.

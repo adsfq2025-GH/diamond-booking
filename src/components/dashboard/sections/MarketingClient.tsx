@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createCoupon, deleteCoupon, setCouponActive } from "@/lib/actions/coupons";
 import { cn } from "@/lib/cn";
 import { money, shortDate } from "@/lib/format";
 import type { CouponView } from "@/lib/dashboard/types";
@@ -24,26 +25,59 @@ export function MarketingClient({
 }) {
   const [coupons, setCoupons] = useState(initial);
   const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
-  function toggle(id: string) {
-    setCoupons((prev) => prev.map((c) => (c.id === id ? { ...c, active: !c.active } : c)));
+  /**
+   * Persist the activate/pause change. This used to flip a boolean in local
+   * state only: nothing reached the coupons table, and the code kept working
+   * (or kept not working) regardless of what the badge said (A16).
+   */
+  async function toggle(id: string, next: boolean) {
+    setBusyId(id);
+    setNotice(null);
+    const result = await setCouponActive(id, next);
+    setBusyId(null);
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error });
+      return;
+    }
+    setCoupons((prev) => prev.map((c) => (c.id === id ? { ...c, active: result.active } : c)));
   }
 
-  function add(d: Draft) {
-    setCoupons((prev) => [
-      {
-        id: `local-${Date.now()}`,
-        code: d.code.toUpperCase(),
-        pctOff: d.type === "pct" ? d.value : null,
-        amountOffCents: d.type === "amount" ? Math.round(d.value * 100) : null,
-        active: true,
-        expiresAt: null,
-        maxRedemptions: d.maxRedemptions ? parseInt(d.maxRedemptions) : null,
-        redemptions: 0,
-      },
-      ...prev,
-    ]);
+  async function add(d: Draft): Promise<string | null> {
+    const result = await createCoupon({
+      code: d.code,
+      type: d.type,
+      value: d.value,
+      maxRedemptions: d.maxRedemptions ? parseInt(d.maxRedemptions, 10) : null,
+    });
+    if (!result.ok) return result.error;
+    setCoupons((prev) => [result.coupon, ...prev]);
     setCreating(false);
+    setNotice({ tone: "ok", text: `${result.coupon.code} is live and will apply at checkout.` });
+    return null;
+  }
+
+  async function remove(id: string) {
+    setBusyId(id);
+    setNotice(null);
+    const result = await deleteCoupon(id);
+    setBusyId(null);
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error });
+      return;
+    }
+    if (result.deleted) {
+      setCoupons((prev) => prev.filter((c) => c.id !== id));
+    } else {
+      // Redeemed coupons are kept so the bookings that used them keep history.
+      setCoupons((prev) => prev.map((c) => (c.id === id ? { ...c, active: false } : c)));
+      setNotice({
+        tone: "ok",
+        text: "That code has been redeemed before, so it was paused rather than deleted.",
+      });
+    }
   }
 
   return (
@@ -54,8 +88,22 @@ export function MarketingClient({
         </span>
       </Toolbar>
 
+      {notice && (
+        <div
+          role="status"
+          className={cn(
+            "mb-4 rounded-[10px] border px-4 py-3 text-[0.82rem]",
+            notice.tone === "error"
+              ? "border-[#e8c0bd] bg-[#fdf6f5] text-[#a63d39]"
+              : "border-success-500/40 bg-success-50 text-success-700",
+          )}
+        >
+          {notice.text}
+        </div>
+      )}
+
       <Panel className="mb-6">
-        <PanelHeader title="Coupons & promotions" caption="Discount codes for your booking widget" />
+        <PanelHeader title="Coupons & promotions" caption="Discount codes customers can enter in your booking widget" />
         {coupons.length === 0 ? (
           <EmptyState icon="marketing" title="No coupons yet" body="Create a discount code to run a promotion." />
         ) : (
@@ -86,17 +134,29 @@ export function MarketingClient({
                   </Td>
                   <Td className="text-ink-muted">{c.expiresAt ? shortDate(c.expiresAt) : "No expiry"}</Td>
                   <Td>
-                    <button
-                      type="button"
-                      onClick={() => toggle(c.id)}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2.5 py-[3px] text-[0.72rem] font-semibold transition-colors",
-                        c.active ? "bg-success-50 text-success-700" : "bg-surface-alt text-ink-faint",
-                      )}
-                    >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", c.active ? "bg-success-500" : "bg-ink-faint")} />
-                      {c.active ? "Active" : "Paused"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={busyId === c.id}
+                        onClick={() => void toggle(c.id, !c.active)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] px-2.5 py-[3px] text-[0.72rem] font-semibold transition-colors disabled:opacity-50",
+                          c.active ? "bg-success-50 text-success-700" : "bg-surface-alt text-ink-faint",
+                        )}
+                      >
+                        <span className={cn("h-1.5 w-1.5 rounded-full", c.active ? "bg-success-500" : "bg-ink-faint")} />
+                        {busyId === c.id ? "Saving…" : c.active ? "Active" : "Paused"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === c.id}
+                        onClick={() => void remove(c.id)}
+                        aria-label={`Delete coupon ${c.code}`}
+                        className="rounded-[8px] px-2 py-1 text-[0.72rem] font-semibold text-ink-faint transition-colors hover:bg-[#fdf6f5] hover:text-[#a63d39] disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </Td>
                 </tr>
               ))}
@@ -147,10 +207,22 @@ function CouponModal({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (d: Draft) => void;
+  /** Resolves to an error message, or null when the coupon was saved. */
+  onSave: (d: Draft) => Promise<string | null>;
 }) {
   const [d, setD] = useState<Draft>({ code: "", type: "pct", value: 10, maxRedemptions: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    const message = await onSave(d);
+    setSaving(false);
+    // On success the parent closes this modal; on failure we stay open and say why.
+    if (message) setError(message);
+  }
 
   return (
     <Modal
@@ -160,13 +232,21 @@ function CouponModal({
       footer={
         <>
           <GhostBtn onClick={onClose}>Cancel</GhostBtn>
-          <ActionButton icon="check" onClick={() => onSave(d)}>
-            Create coupon
+          <ActionButton icon="check" onClick={() => void save()}>
+            {saving ? "Creating…" : "Create coupon"}
           </ActionButton>
         </>
       }
     >
       <div className="space-y-4">
+        {error && (
+          <div
+            role="alert"
+            className="rounded-[10px] border border-[#e8c0bd] bg-[#fdf6f5] px-4 py-3 text-[0.82rem] text-[#a63d39]"
+          >
+            {error}
+          </div>
+        )}
         <div>
           <Label htmlFor="cp-code">Code</Label>
           <input

@@ -461,6 +461,8 @@ export interface Database {
           customer_notes: string | null;
           internal_notes: string | null;
           source: string;
+          coupon_id: string | null;
+          discount_cents: number;
           cancellation_reason: string | null;
           recurrence_group_id: string | null;
           recurrence_rule: string | null;
@@ -483,6 +485,8 @@ export interface Database {
           customer_notes?: string | null;
           internal_notes?: string | null;
           source?: string;
+          coupon_id?: string | null;
+          discount_cents?: number;
           cancellation_reason?: string | null;
           recurrence_group_id?: string | null;
           recurrence_rule?: string | null;
@@ -505,6 +509,8 @@ export interface Database {
           customer_notes?: string | null;
           internal_notes?: string | null;
           source?: string;
+          coupon_id?: string | null;
+          discount_cents?: number;
           cancellation_reason?: string | null;
           recurrence_group_id?: string | null;
           recurrence_rule?: string | null;
@@ -692,6 +698,125 @@ export interface Database {
         };
         Relationships: [];
       };
+      contact_submissions: {
+        // Marketing contact form (0010). RLS on, NO policies: service role only.
+        Row: {
+          id: string;
+          name: string;
+          email: string;
+          business: string | null;
+          message: string;
+          source: string;
+          user_agent: string | null;
+          status: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          email: string;
+          business?: string | null;
+          message: string;
+          source?: string;
+          user_agent?: string | null;
+          status?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          email?: string;
+          business?: string | null;
+          message?: string;
+          source?: string;
+          user_agent?: string | null;
+          status?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      booking_inquiries: {
+        // Demand capture when a day has no openings (0010). A request, never a
+        // reservation: it holds no slot.
+        Row: {
+          id: string;
+          tenant_id: string;
+          service_id: string | null;
+          customer_name: string;
+          customer_email: string;
+          customer_phone: string | null;
+          requested_date: string | null;
+          notes: string | null;
+          status: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          service_id?: string | null;
+          customer_name: string;
+          customer_email: string;
+          customer_phone?: string | null;
+          requested_date?: string | null;
+          notes?: string | null;
+          status?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          service_id?: string | null;
+          customer_name?: string;
+          customer_email?: string;
+          customer_phone?: string | null;
+          requested_date?: string | null;
+          notes?: string | null;
+          status?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      employee_invitations: {
+        // Token-based teammate invitations (0010). The token is never selected
+        // by a client: acceptance goes through accept_employee_invitation.
+        Row: {
+          id: string;
+          tenant_id: string;
+          employee_id: string;
+          email: string;
+          token: string;
+          invited_by: string | null;
+          expires_at: string;
+          accepted_at: string | null;
+          revoked_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          employee_id: string;
+          email: string;
+          token?: string;
+          invited_by?: string | null;
+          expires_at?: string;
+          accepted_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          employee_id?: string;
+          email?: string;
+          token?: string;
+          invited_by?: string | null;
+          expires_at?: string;
+          accepted_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       tenant_secrets: {
         // Integration credentials. RLS on, NO policies: service role only.
         // See supabase/migrations/0007_security.sql.
@@ -771,6 +896,7 @@ export interface Database {
           expires_at: string | null;
           max_redemptions: number | null;
           redemptions: number;
+          min_subtotal_cents: number;
           created_at: string;
         };
         Insert: {
@@ -783,6 +909,7 @@ export interface Database {
           expires_at?: string | null;
           max_redemptions?: number | null;
           redemptions?: number;
+          min_subtotal_cents?: number;
           created_at?: string;
         };
         Update: {
@@ -795,6 +922,7 @@ export interface Database {
           expires_at?: string | null;
           max_redemptions?: number | null;
           redemptions?: number;
+          min_subtotal_cents?: number;
           created_at?: string;
         };
         Relationships: [];
@@ -1023,6 +1151,59 @@ export interface Database {
           payment_ready: boolean;
           counts: Record<string, number>;
           blockers: string[];
+        };
+      };
+      // 0010_completeness.sql
+      create_booking_inquiry: {
+        Args: {
+          p_public_key: string;
+          p_customer_name: string;
+          p_customer_email: string;
+          p_customer_phone?: string | null;
+          p_service_id?: string | null;
+          p_requested_date?: string | null;
+          p_notes?: string | null;
+        };
+        Returns: { inquiry_id: string };
+      };
+      accept_employee_invitation: {
+        Args: { p_token: string };
+        Returns: { tenant_id: string; employee_id: string };
+      };
+      price_coupon: {
+        Args: { p_tenant_id: string; p_code: string; p_subtotal_cents: number };
+        Returns: {
+          ok: boolean;
+          error?: string;
+          coupon_id?: string;
+          code?: string;
+          discount_cents?: number;
+          min_subtotal_cents?: number;
+        };
+      };
+      quote_booking: {
+        Args: {
+          p_public_key: string;
+          p_service_id: string;
+          p_addon_ids?: string[];
+          p_coupon_code?: string | null;
+        };
+        Returns: {
+          subtotal_cents: number;
+          discount_cents: number;
+          total_cents: number;
+          deposit_cents: number;
+          duration_minutes: number;
+          coupon: { ok: boolean; error?: string; code?: string; discount_cents?: number };
+        };
+      };
+      apply_coupon_to_booking: {
+        Args: { p_public_key: string; p_booking_id: string; p_code: string };
+        Returns: {
+          ok: boolean;
+          error?: string;
+          discount_cents?: number;
+          total_cents?: number;
         };
       };
       booking_duration_minutes: {

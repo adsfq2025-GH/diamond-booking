@@ -229,9 +229,121 @@ function bookingErrorMessage(raw?: string): string {
   return "Could not create the booking. Please try again.";
 }
 
+/**
+ * Price a service + add-ons + an optional coupon before booking (A16).
+ * The quote and the booking share price_coupon()/booking_duration_minutes()
+ * in SQL, so what the customer is shown cannot drift from what is charged.
+ */
+export async function quoteBooking(input: {
+  publicKey: string;
+  serviceId: string;
+  addonIds?: string[];
+  couponCode?: string | null;
+}): Promise<{
+  subtotalCents: number;
+  discountCents: number;
+  totalCents: number;
+  depositCents: number;
+  durationMinutes: number;
+  couponError: string | null;
+} | null> {
+  if (!supabaseEnvConfigured()) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("quote_booking", {
+    p_public_key: input.publicKey,
+    p_service_id: input.serviceId,
+    p_addon_ids: input.addonIds ?? [],
+    p_coupon_code: input.couponCode ?? null,
+  });
+  if (error || !data) return null;
+
+  const q = data as unknown as {
+    subtotal_cents: number;
+    discount_cents: number;
+    total_cents: number;
+    deposit_cents: number;
+    duration_minutes: number;
+    coupon: { ok: boolean; error?: string; min_subtotal_cents?: number };
+  };
+  return {
+    subtotalCents: q.subtotal_cents,
+    discountCents: q.discount_cents,
+    totalCents: q.total_cents,
+    depositCents: q.deposit_cents,
+    durationMinutes: q.duration_minutes,
+    couponError:
+      input.couponCode && !q.coupon?.ok
+        ? couponErrorMessage(q.coupon?.error, q.coupon?.min_subtotal_cents)
+        : null,
+  };
+}
+
+function couponErrorMessage(code?: string, minSubtotalCents?: number): string {
+  switch (code) {
+    case "not_found":
+      return "We don't recognise that code.";
+    case "inactive":
+      return "That code is no longer active.";
+    case "expired":
+      return "That code has expired.";
+    case "fully_redeemed":
+      return "That code has reached its redemption limit.";
+    case "below_minimum":
+      return minSubtotalCents
+        ? `That code needs a minimum order of $${(minSubtotalCents / 100).toFixed(2)}.`
+        : "Your order doesn't meet the minimum for that code.";
+    default:
+      return "That code can't be applied.";
+  }
+}
+
+/**
+ * Record an enquiry when a customer cannot find a slot (A34).
+ *
+ * Explicitly NOT a booking: it reserves nothing and consumes no capacity. The
+ * no-availability state used to be a dead end — "No openings this day. Try
+ * another date." and nothing else — so every customer who landed on a full day
+ * was lost silently.
+ */
+export async function createBookingInquiry(input: {
+  publicKey: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone?: string | null;
+  serviceId?: string | null;
+  requestedDate?: string | null;
+  notes?: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!supabaseEnvConfigured()) {
+    return { ok: true }; // preview mode: pretend, nothing to store
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("create_booking_inquiry", {
+    p_public_key: input.publicKey,
+    p_customer_name: input.customerName,
+    p_customer_email: input.customerEmail,
+    p_customer_phone: input.customerPhone ?? null,
+    p_service_id: input.serviceId ?? null,
+    p_requested_date: input.requestedDate ?? null,
+    p_notes: input.notes ?? null,
+  });
+  if (error) {
+    const code = error.message.toLowerCase();
+    if (code.includes("too_many_requests")) {
+      return { ok: false, error: "We already have your request — the business will be in touch." };
+    }
+    if (code.includes("name_required")) return { ok: false, error: "Please enter your name." };
+    if (code.includes("email_required")) return { ok: false, error: "Please enter your email address." };
+    return { ok: false, error: "Could not send your request. Please try again." };
+  }
+  return { ok: true };
+}
+
 export interface CreateBookingInput {
   publicKey: string;
   serviceId: string;
+  /** Discount code the customer entered, validated server-side. */
+  couponCode?: string | null;
   startsAt: string;
   customerName: string;
   customerEmail: string;
@@ -447,6 +559,25 @@ export async function createWidgetBooking(
     return { ok: false, error: bookingErrorMessage(error?.message) };
   }
   const result = data as unknown as WidgetBookingResult;
+
+  // Apply the coupon to the booking that was just created, before anything
+  // else reads its price. The RPC re-validates the code and claims the
+  // redemption atomically, so a coupon cannot be over-redeemed by two
+  // simultaneous bookings.
+  if (input.couponCode?.trim()) {
+    const { data: couponResult } = await supabase.rpc("apply_coupon_to_booking", {
+      p_public_key: input.publicKey,
+      p_booking_id: result.booking_id,
+      p_code: input.couponCode.trim(),
+    });
+    const applied = couponResult as unknown as
+      | { ok: boolean; discount_cents?: number; total_cents?: number }
+      | null;
+    if (applied?.ok && typeof applied.total_cents === "number") {
+      result.price_cents = applied.total_cents;
+      result.discount_cents = applied.discount_cents ?? 0;
+    }
+  }
 
   const admin = createAdminClient();
   const { data: bookingRow } = await admin

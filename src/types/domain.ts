@@ -74,6 +74,8 @@ export interface WidgetBookingResult {
   ends_at: string;
   price_cents: number;
   deposit_cents: number;
+  /** Coupon discount applied after creation, if any. */
+  discount_cents?: number;
   deposit_client_secret?: string | null;
   deposit_payment_intent_id?: string | null;
   /**
