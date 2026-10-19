@@ -68,6 +68,7 @@ export interface Database {
           settings: Json;
           plan: PlanTier;
           subscription_status: SubscriptionStatus;
+          billing_cycle: "monthly" | "yearly";
           trial_ends_at: string | null;
           stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
@@ -92,6 +93,7 @@ export interface Database {
           settings?: Json;
           plan?: PlanTier;
           subscription_status?: SubscriptionStatus;
+          billing_cycle?: "monthly" | "yearly";
           trial_ends_at?: string | null;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
@@ -116,6 +118,7 @@ export interface Database {
           settings?: Json;
           plan?: PlanTier;
           subscription_status?: SubscriptionStatus;
+          billing_cycle?: "monthly" | "yearly";
           trial_ends_at?: string | null;
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;

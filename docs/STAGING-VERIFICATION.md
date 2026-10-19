@@ -1,7 +1,31 @@
 # Staging verification — applying 0007–0010 and proving they work
 
+> **Status, 19 October 2026: migrations 0007–0010 were applied directly to
+> PRODUCTION, skipping staging.** `00_migration_state.sql` confirms 0001–0010
+> all `APPLIED`. That makes steps 1–3 below historical for this deployment.
+>
+> What still matters, in this order:
+> 1. **Run `supabase/tests/04_production_integrity.sql`** (read-only). 0007 is
+>    the one migration that moved existing data and deleted the original — it
+>    copied `tenants.settings->'email'` into `tenant_secrets` and stripped the
+>    key — so confirm the move landed before anything else.
+> 2. **Deploy the new build.** The SQL is live and the code is not, which is a
+>    worse state than either alone: the old build reads tenant SMTP from the
+>    location 0007 just emptied, and *writes credentials back there* if an owner
+>    re-saves email settings. Section 5 of `04_production_integrity.sql`
+>    measures that exposure.
+> 3. **Rotate** the SMTP passwords and Google tokens (step 5) — they were
+>    readable by lower-privileged roles before 0007.
+> 4. **Run `01`, `02` and `03`** against production. They roll back, so they are
+>    safe, and they are the only proof the fixes actually hold where it counts.
+> 5. Apply **`0011_billing_cycle.sql`** when you deploy annual billing.
+>
+> Keep the rest of this document for the next environment you set up.
+
 This is the runbook for taking the audit fixes from "committed" to "verified."
-Do it in order. **Nothing here touches production until step 8.**
+Do it in order. **Nothing here touches production until step 8** — which is why
+the banner above exists: on this deployment that order was not followed, so the
+checks that would have run on staging have to run on live data instead.
 
 Why it matters: the four migrations added by the audit fixes have never been
 executed. No Postgres or Docker was available on the machine that wrote them, so

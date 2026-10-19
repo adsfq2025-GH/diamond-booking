@@ -170,13 +170,14 @@ export function PricingHero() {
                       ? `Billed yearly — ${formatPlanPrice(plan.priceYearly)}/yr (save ${Math.round(yearlySaving(tier) * 100)}%)`
                       : "Billed monthly · cancel anytime"}
                     {/*
-                      Annual checkout is not wired: startCheckout only ever
-                      uses the monthly price id. Rather than let a customer
-                      pick yearly and be charged monthly, say how it works.
+                      Annual billing is self-serve now (0011 + startCheckout
+                      takes a cycle). The trial is the same either way, and the
+                      period is chosen in Settings when the trial converts, so
+                      say that rather than implying payment happens here.
                     */}
                     {yearly && (
                       <span className="mt-1 block">
-                        Annual billing is arranged with our team after signup.
+                        Choose yearly when your trial converts — no card needed today.
                       </span>
                     )}
                   </div>

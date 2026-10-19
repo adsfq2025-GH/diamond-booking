@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type Stripe from "stripe";
 import { getStripe, stripeConfigured } from "@/lib/integrations/stripe";
 import { createAdminClient } from "@/lib/supabase/server";
-import { tierFromStripePriceId } from "@/lib/plans";
+import { planForStripePriceId, type BillingCycle } from "@/lib/plans";
 import type { SubscriptionStatus, PlanTier } from "@/types/database";
 
 /**
@@ -62,6 +62,7 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
       const s = event.data.object as Stripe.Checkout.Session;
       const tenantId = s.client_reference_id ?? s.metadata?.tenant_id;
       const tier = (s.metadata?.tier as PlanTier | undefined) ?? undefined;
+      const cycle = normalizeCycle(s.metadata?.cycle);
       if (tenantId) {
         await setTenant(
           { column: "id", value: tenantId },
@@ -70,6 +71,7 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
             stripe_subscription_id: typeof s.subscription === "string" ? s.subscription : null,
             subscription_status: "active" satisfies SubscriptionStatus,
             ...(tier ? { plan: tier } : {}),
+            ...(cycle ? { billing_cycle: cycle } : {}),
           },
         );
       }
@@ -80,13 +82,32 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
     case "customer.subscription.created": {
       const sub = event.data.object as Stripe.Subscription;
       const tenantId = sub.metadata?.tenant_id;
-      const priceId = sub.items.data[0]?.price.id;
-      const tier = priceId ? tierFromStripePriceId(priceId) : null;
+      const price = sub.items.data[0]?.price;
+      const matched = price?.id ? planForStripePriceId(price.id) : null;
+
+      // Prefer the configured price id, which gives tier AND cycle together.
+      // Fall back to the price's own interval so a subscription created outside
+      // the app (or on a price id we no longer configure) still records the
+      // right period instead of silently staying monthly.
+      const cycle =
+        matched?.cycle ??
+        (price?.recurring?.interval === "year"
+          ? "yearly"
+          : price?.recurring?.interval === "month"
+            ? "monthly"
+            : null);
+
       const patch: Record<string, unknown> = {
         subscription_status: mapStatus(sub.status),
         stripe_subscription_id: sub.id,
-        ...(tier ? { plan: tier } : {}),
+        ...(matched?.tier ? { plan: matched.tier } : {}),
+        ...(cycle ? { billing_cycle: cycle } : {}),
       };
+      if (!matched && price?.id) {
+        console.warn(
+          `[stripe webhook] price ${price.id} matches no configured STRIPE_PRICE_* var; plan left unchanged`,
+        );
+      }
       if (tenantId) await setTenant({ column: "id", value: tenantId }, patch);
       else await setTenant({ column: "stripe_subscription_id", value: sub.id }, patch);
       break;
@@ -231,6 +252,11 @@ async function handleEvent(stripe: Stripe, event: Stripe.Event) {
     default:
       break;
   }
+}
+
+/** Only the two values the column's check constraint allows. */
+function normalizeCycle(value: string | undefined): BillingCycle | null {
+  return value === "yearly" || value === "monthly" ? value : null;
 }
 
 /**

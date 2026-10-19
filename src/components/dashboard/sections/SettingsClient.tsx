@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
-import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
+import { PLANS, PLAN_ORDER, formatPlanPrice, yearlySaving, type BillingCycle } from "@/lib/plans";
 import { connectStripeAccount, openBillingPortal, refreshStripeConnectStatus, startCheckout } from "@/lib/actions/billing";
 import {
   saveBookingSettings,
@@ -47,6 +47,8 @@ export function SettingsClient({
   email,
   booking,
   plan,
+  billingCycle,
+  yearlyAvailable,
   integrations,
   notificationSettings,
   connections,
@@ -55,6 +57,10 @@ export function SettingsClient({
   email: EmailSettingsView;
   booking: BookingSettingsView;
   plan: PlanTier;
+  /** What this tenant is billed on today. */
+  billingCycle: BillingCycle;
+  /** Whether yearly price ids are configured, i.e. whether yearly is sellable. */
+  yearlyAvailable: boolean;
   integrations: IntegrationFlags;
   notificationSettings: NotificationSettingsView;
   connections: IntegrationConnectionView;
@@ -109,7 +115,13 @@ export function SettingsClient({
           {tab === "integrations" && <IntegrationsTab flags={integrations} email={email} connections={connections} />}
           {tab === "security" && <SecurityTab />}
           {tab === "team" && <TeamPermissionsTab />}
-          {tab === "billing" && <BillingTab plan={plan} />}
+          {tab === "billing" && (
+            <BillingTab
+              plan={plan}
+              currentCycle={billingCycle}
+              yearlyAvailable={yearlyAvailable}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -641,14 +653,27 @@ function TeamPermissionsTab() {
   );
 }
 
-function BillingTab({ plan }: { plan: PlanTier }) {
+function BillingTab({
+  plan,
+  currentCycle,
+  yearlyAvailable,
+}: {
+  plan: PlanTier;
+  /** What this tenant is billed on today, per the Stripe webhook. */
+  currentCycle: BillingCycle;
+  /** False when the yearly price ids are not configured — then no toggle. */
+  yearlyAvailable: boolean;
+}) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Default the picker to what they are already on, so switching tier does
+  // not quietly move them onto a different billing period.
+  const [cycle, setCycle] = useState<BillingCycle>(currentCycle);
 
   async function checkout(tier: PlanTier) {
     setBusy(tier);
     setNotice(null);
-    const res = await startCheckout(tier); // redirects on success
+    const res = await startCheckout(tier, cycle); // redirects on success
     if (res && !res.ok) setNotice(res.error);
     setBusy(null);
   }
@@ -673,23 +698,67 @@ function BillingTab({ plan }: { plan: PlanTier }) {
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
           <div>
             <p className="font-display text-[1.3rem] font-semibold text-ink">{PLANS[plan].name}</p>
-            <p className="text-[0.82rem] text-ink-faint">{formatPlanPrice(PLANS[plan].priceMonthly)}/month · billed monthly</p>
+            <p className="text-[0.82rem] text-ink-faint">
+              {currentCycle === "yearly"
+                ? `${formatPlanPrice(PLANS[plan].priceYearly)}/year · billed yearly`
+                : `${formatPlanPrice(PLANS[plan].priceMonthly)}/month · billed monthly`}
+            </p>
           </div>
           <GhostBtn onClick={portal}>{busy === "portal" ? "Opening…" : "Manage payment method"}</GhostBtn>
         </div>
       </Panel>
 
+      {/*
+        The billing-period choice. Checkout used to resolve one price id per
+        tier, so yearly could not be bought at all — the marketing page's
+        yearly toggle was display-only and selecting it would still have
+        charged monthly.
+      */}
+      {yearlyAvailable && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-[10px] border border-line-strong p-1">
+            {(["monthly", "yearly"] as BillingCycle[]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCycle(c)}
+                className={cn(
+                  "rounded-[7px] px-3.5 py-1.5 text-[0.8rem] font-semibold transition-colors",
+                  cycle === c ? "bg-navy-900 text-white" : "text-ink-muted hover:text-ink",
+                )}
+              >
+                {c === "monthly" ? "Monthly" : "Yearly"}
+              </button>
+            ))}
+          </div>
+          <p className="text-[0.78rem] text-ink-faint">
+            {cycle === "yearly"
+              ? "Billed once a year."
+              : `Yearly billing saves up to ${Math.round(Math.max(...PLAN_ORDER.map((t) => yearlySaving(t))) * 100)}%.`}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 min-[641px]:grid-cols-3">
         {PLAN_ORDER.map((tier) => {
           const p = PLANS[tier];
-          const current = tier === plan;
+          // "Current" means same tier AND same period: moving between periods
+          // on the same tier is a real change the owner must be able to make.
+          const current = tier === plan && cycle === currentCycle;
           return (
             <Panel key={tier} className={cn("flex flex-col p-5", current && "ring-2 ring-blue-600")}>
               <p className="font-display text-[1.05rem] font-semibold text-ink">{p.name}</p>
               <p className="font-instrument mt-1 text-[1.6rem] font-semibold text-ink">
-                {formatPlanPrice(p.priceMonthly)}
-                <span className="text-[0.8rem] font-medium text-ink-faint">/mo</span>
+                {formatPlanPrice(cycle === "yearly" ? p.priceYearly : p.priceMonthly)}
+                <span className="text-[0.8rem] font-medium text-ink-faint">
+                  {cycle === "yearly" ? "/yr" : "/mo"}
+                </span>
               </p>
+              {cycle === "yearly" && (
+                <p className="mt-0.5 text-[0.72rem] text-success-700">
+                  save {Math.round(yearlySaving(tier) * 100)}% vs monthly
+                </p>
+              )}
               <ul className="mt-4 flex-1 space-y-1.5">
                 {p.highlights.slice(0, 4).map((h) => (
                   <li key={h} className="flex items-start gap-2 text-[0.78rem] text-ink-muted">
@@ -709,7 +778,15 @@ function BillingTab({ plan }: { plan: PlanTier }) {
                     : "bg-navy-900 text-white hover:bg-navy-800",
                 )}
               >
-                {current ? "Current plan" : busy === tier ? "Starting…" : "Switch"}
+                {current
+                  ? "Current plan"
+                  : busy === tier
+                    ? "Starting…"
+                    : tier === plan
+                      ? cycle === "yearly"
+                        ? "Switch to yearly"
+                        : "Switch to monthly"
+                      : "Switch"}
               </button>
             </Panel>
           );

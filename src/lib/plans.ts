@@ -30,11 +30,12 @@ export interface PlanDefinition {
    */
   priceMonthly: number;
   /**
-   * USD per year, from the real Stripe yearly Price. Display only for now:
-   * annual checkout is not wired (startCheckout only ever uses the monthly
-   * price id), so the pricing page says annual is arranged with the team.
-   * The page used to compute this as priceMonthly * 10 and claim "2 months
-   * free", which matched none of the actual yearly prices.
+   * USD per year, and it MUST equal the amount on the Stripe Price that
+   * STRIPE_PRICE_<TIER>_YEARLY points at — configCheck compares them, the
+   * same as the monthly pair.
+   *
+   * The pricing page used to compute this as priceMonthly * 10 and claim
+   * "2 months free", which matched none of the real yearly prices.
    */
   priceYearly: number;
   description: string;
@@ -137,30 +138,66 @@ export const PLANS: Record<PlanTier, PlanDefinition> = {
 
 export const PLAN_ORDER: PlanTier[] = ["starter", "professional", "elite"];
 
+/** How often a subscription renews. */
+export type BillingCycle = "monthly" | "yearly";
+
+export const BILLING_CYCLES: BillingCycle[] = ["monthly", "yearly"];
+
+/**
+ * The env var holding a tier's Stripe Price id, per cycle. Monthly keeps the
+ * unsuffixed name it already had, so no existing configuration breaks.
+ */
+export function stripePriceEnvName(tier: PlanTier, cycle: BillingCycle): string {
+  const base = `STRIPE_PRICE_${tier.toUpperCase()}`;
+  return cycle === "yearly" ? `${base}_YEARLY` : base;
+}
+
 /** Stripe Price IDs come from the environment (server-side only). */
-export function getStripePriceId(tier: PlanTier): string {
-  const map: Record<PlanTier, string | undefined> = {
-    starter: process.env.STRIPE_PRICE_STARTER,
-    professional: process.env.STRIPE_PRICE_PROFESSIONAL,
-    elite: process.env.STRIPE_PRICE_ELITE,
-  };
-  const id = map[tier];
+export function getStripePriceId(tier: PlanTier, cycle: BillingCycle = "monthly"): string {
+  const name = stripePriceEnvName(tier, cycle);
+  const id = process.env[name]?.trim();
   if (!id) {
-    throw new Error(`Missing Stripe price id env var for plan "${tier}"`);
+    throw new Error(`Missing Stripe price id: set ${name} for the ${tier} plan (${cycle})`);
   }
   return id;
 }
 
-/** Reverse lookup: which tier does a Stripe price id belong to? */
-export function tierFromStripePriceId(priceId: string): PlanTier | null {
+/** Is a cycle actually purchasable, i.e. is its price id configured? */
+export function cycleAvailable(tier: PlanTier, cycle: BillingCycle): boolean {
+  return Boolean(process.env[stripePriceEnvName(tier, cycle)]?.trim());
+}
+
+/** Yearly is offered only when every tier has a yearly price configured. */
+export function yearlyBillingAvailable(): boolean {
+  return PLAN_ORDER.every((tier) => cycleAvailable(tier, "yearly"));
+}
+
+/**
+ * Reverse lookup for the webhook: which tier AND cycle does a Stripe price id
+ * belong to? Returning the cycle matters — without it a yearly subscription
+ * could not be told apart from a monthly one, and the tenant's recorded cycle
+ * would silently stay "monthly".
+ */
+export function planForStripePriceId(
+  priceId: string,
+): { tier: PlanTier; cycle: BillingCycle } | null {
   for (const tier of PLAN_ORDER) {
-    try {
-      if (getStripePriceId(tier) === priceId) return tier;
-    } catch {
-      // env var not set for that tier; keep looking
+    for (const cycle of BILLING_CYCLES) {
+      const configured = process.env[stripePriceEnvName(tier, cycle)]?.trim();
+      if (configured && configured === priceId) return { tier, cycle };
     }
   }
   return null;
+}
+
+/** Reverse lookup by tier alone. Kept for callers that do not care about cycle. */
+export function tierFromStripePriceId(priceId: string): PlanTier | null {
+  return planForStripePriceId(priceId)?.tier ?? null;
+}
+
+/** The headline amount for a tier on a given cycle. */
+export function planPrice(tier: PlanTier, cycle: BillingCycle): number {
+  return cycle === "yearly" ? PLANS[tier].priceYearly : PLANS[tier].priceMonthly;
 }
 
 /** Feature gate helper: `hasFeature(tenant.plan, "invoicing")`. */

@@ -1,5 +1,12 @@
 import "server-only";
-import { PLANS, PLAN_ORDER, formatPlanPrice } from "@/lib/plans";
+import {
+  BILLING_CYCLES,
+  PLANS,
+  PLAN_ORDER,
+  formatPlanPrice,
+  stripePriceEnvName,
+  type BillingCycle,
+} from "@/lib/plans";
 
 /**
  * Configuration self-check (A06).
@@ -163,10 +170,23 @@ export async function stripePriceProblems(): Promise<ConfigProblem[]> {
   const secret = process.env.STRIPE_SECRET_KEY?.trim();
   if (!secret) return problems; // already reported by configProblems()
 
-  for (const tier of PLAN_ORDER) {
-    const envName = `STRIPE_PRICE_${tier.toUpperCase()}`;
+  // Both cycles, because a yearly price id is just as capable of charging an
+  // amount the page never showed.
+  const pairs: Array<{ tier: (typeof PLAN_ORDER)[number]; cycle: BillingCycle }> =
+    PLAN_ORDER.flatMap((tier) =>
+      BILLING_CYCLES.map((cycle) => ({ tier, cycle })),
+    );
+
+  for (const { tier, cycle } of pairs) {
+    const envName = stripePriceEnvName(tier, cycle);
     const priceId = process.env[envName]?.trim();
-    if (!priceId) continue; // already reported as a blocker
+    // Monthly missing is already a blocker; yearly missing just means yearly
+    // is not on sale, which is a legitimate configuration.
+    if (!priceId) continue;
+
+    const shown = cycle === "yearly" ? PLANS[tier].priceYearly : PLANS[tier].priceMonthly;
+    const expectedInterval = cycle === "yearly" ? "year" : "month";
+    const label = `${PLANS[tier].name} ${cycle}`;
 
     try {
       const res = await fetch(`https://api.stripe.com/v1/prices/${encodeURIComponent(priceId)}`, {
@@ -180,8 +200,8 @@ export async function stripePriceProblems(): Promise<ConfigProblem[]> {
           area: "Stripe prices",
           message:
             res.status === 404
-              ? `${envName} points at ${priceId}, which does not exist in this Stripe account. Checkout for ${PLANS[tier].name} will fail.`
-              : `Could not read the ${PLANS[tier].name} price from Stripe (HTTP ${res.status}); displayed and charged amounts are unverified.`,
+              ? `${envName} points at ${priceId}, which does not exist in this Stripe account. Checkout for ${label} will fail.`
+              : `Could not read the ${label} price from Stripe (HTTP ${res.status}); displayed and charged amounts are unverified.`,
         });
         continue;
       }
@@ -193,41 +213,40 @@ export async function stripePriceProblems(): Promise<ConfigProblem[]> {
         recurring?: { interval?: string } | null;
       };
       const charged = (price.unit_amount ?? 0) / 100;
-      const shown = PLANS[tier].priceMonthly;
 
       if (Math.abs(charged - shown) > 0.005) {
         problems.push({
           severity: "blocker",
           area: "Stripe prices",
-          message: `${PLANS[tier].name}: the app shows ${formatPlanPrice(shown)}/month but Stripe charges $${charged.toFixed(2)}. A customer would be billed an amount they were never shown. Fix lib/plans.ts or the Stripe Price so they agree.`,
+          message: `${label}: the app shows ${formatPlanPrice(shown)} but Stripe charges $${charged.toFixed(2)}. A customer would be billed an amount they were never shown. Fix lib/plans.ts or the Stripe Price so they agree.`,
         });
       }
       if (price.active === false) {
         problems.push({
           severity: "blocker",
           area: "Stripe prices",
-          message: `${PLANS[tier].name}: the Stripe Price ${priceId} is archived, so checkout will fail.`,
+          message: `${label}: the Stripe Price ${priceId} is archived, so checkout will fail.`,
         });
       }
-      if (price.recurring?.interval && price.recurring.interval !== "month") {
+      if (price.recurring?.interval !== expectedInterval) {
         problems.push({
           severity: "blocker",
           area: "Stripe prices",
-          message: `${PLANS[tier].name}: ${envName} points at a ${price.recurring.interval}ly price, but it is used as the monthly plan.`,
+          message: `${label}: ${envName} points at a ${price.recurring?.interval ?? "non-recurring"} price, but it is sold as ${cycle}. A customer would be billed on the wrong period.`,
         });
       }
       if (price.currency && price.currency !== "usd") {
         problems.push({
           severity: "warning",
           area: "Stripe prices",
-          message: `${PLANS[tier].name}: the Stripe Price is in ${price.currency.toUpperCase()} while the app renders US dollars.`,
+          message: `${label}: the Stripe Price is in ${price.currency.toUpperCase()} while the app renders US dollars.`,
         });
       }
     } catch {
       problems.push({
         severity: "warning",
         area: "Stripe prices",
-        message: `Could not reach Stripe to verify the ${PLANS[tier].name} price; displayed and charged amounts are unverified.`,
+        message: `Could not reach Stripe to verify the ${label} price; displayed and charged amounts are unverified.`,
       });
     }
   }

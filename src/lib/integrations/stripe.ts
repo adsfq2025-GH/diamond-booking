@@ -1,6 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
-import { getStripePriceId } from "@/lib/plans";
+import { getStripePriceId, stripePriceEnvName, type BillingCycle } from "@/lib/plans";
 import type { PlanTier } from "@/types/database";
 import type { StripeConnectStatus } from "@/lib/integrations/types";
 
@@ -89,29 +89,69 @@ export async function fetchConnectAccountStatus(accountId: string): Promise<Stri
  */
 export async function createSubscriptionCheckout(opts: {
   tier: PlanTier;
+  /** Monthly or yearly. Defaults to monthly so existing callers are unchanged. */
+  cycle?: BillingCycle;
   tenantId: string;
   customerEmail: string;
   stripeCustomerId?: string | null;
 }): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const stripe = getStripe();
   if (!stripe) return { ok: false, error: "Stripe is not configured." };
+  const cycle: BillingCycle = opts.cycle ?? "monthly";
 
   let priceId: string;
   try {
-    priceId = getStripePriceId(opts.tier);
+    priceId = getStripePriceId(opts.tier, cycle);
   } catch {
-    return { ok: false, error: `No Stripe price configured for the ${opts.tier} plan.` };
+    return {
+      ok: false,
+      error:
+        cycle === "yearly"
+          ? `Yearly billing isn't available for the ${opts.tier} plan yet. Choose monthly, or contact support.`
+          : `No Stripe price configured for the ${opts.tier} plan.`,
+    };
+  }
+
+  // Confirm the price really renews on the interval we are selling before
+  // sending anyone to pay. A yearly price id pasted into the monthly variable
+  // (or the reverse) would otherwise bill a customer on the wrong period, and
+  // they would only find out on the receipt.
+  try {
+    const price = await stripe.prices.retrieve(priceId);
+    const expected = cycle === "yearly" ? "year" : "month";
+    const actual = price.recurring?.interval;
+    if (!actual) {
+      return { ok: false, error: "That plan's Stripe price is not a recurring price." };
+    }
+    if (actual !== expected) {
+      console.error(
+        `[stripe] ${stripePriceEnvName(opts.tier, cycle)} points at a ${actual}ly price; refusing to sell it as ${cycle}`,
+      );
+      return {
+        ok: false,
+        error: "This plan is misconfigured and cannot be purchased right now. Please contact support.",
+      };
+    }
+    if (price.active === false) {
+      return { ok: false, error: "That plan is not currently available for purchase." };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Could not verify the plan price with Stripe.",
+    };
   }
 
   try {
+    const metadata = { tenant_id: opts.tenantId, tier: opts.tier, cycle };
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       customer: opts.stripeCustomerId ?? undefined,
       customer_email: opts.stripeCustomerId ? undefined : opts.customerEmail,
       client_reference_id: opts.tenantId,
-      subscription_data: { metadata: { tenant_id: opts.tenantId, tier: opts.tier } },
-      metadata: { tenant_id: opts.tenantId, tier: opts.tier },
+      subscription_data: { metadata },
+      metadata,
       success_url: `${appUrl()}/dashboard?billing=success`,
       cancel_url: `${appUrl()}/dashboard/settings#billing`,
       allow_promotion_codes: true,

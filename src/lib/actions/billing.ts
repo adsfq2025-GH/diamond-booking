@@ -10,6 +10,12 @@ import {
   fetchConnectAccountStatus,
   stripeConfigured,
 } from "@/lib/integrations/stripe";
+import {
+  BILLING_CYCLES,
+  PLAN_ORDER,
+  cycleAvailable,
+  type BillingCycle,
+} from "@/lib/plans";
 import type { PlanTier } from "@/types/database";
 
 /**
@@ -18,12 +24,32 @@ import type { PlanTier } from "@/types/database";
  */
 export async function startCheckout(
   tier: PlanTier,
+  cycle: BillingCycle = "monthly",
 ): Promise<{ ok: false; error: string }> {
   if (!stripeConfigured()) {
     return { ok: false, error: "Payments aren't set up yet. Add your Stripe keys to enable checkout." };
   }
   const profile = await requireRole("business_owner");
   if (!profile.tenant_id) return { ok: false, error: "No business found for this account." };
+
+  // This is a public server action, so neither argument can be trusted: a
+  // caller could post any string. Reject anything outside the catalog rather
+  // than letting it reach Stripe.
+  if (!PLAN_ORDER.includes(tier)) {
+    return { ok: false, error: "Unknown plan." };
+  }
+  if (!BILLING_CYCLES.includes(cycle)) {
+    return { ok: false, error: "Unknown billing period." };
+  }
+  if (!cycleAvailable(tier, cycle)) {
+    return {
+      ok: false,
+      error:
+        cycle === "yearly"
+          ? "Yearly billing isn't available yet. Choose monthly, or contact support."
+          : "That plan isn't available for purchase right now.",
+    };
+  }
 
   const supabase = await createClient();
   const { data: tenant } = await supabase
@@ -34,6 +60,7 @@ export async function startCheckout(
 
   const res = await createSubscriptionCheckout({
     tier,
+    cycle,
     tenantId: profile.tenant_id,
     customerEmail: tenant?.email ?? profile.email ?? "",
     stripeCustomerId: tenant?.stripe_customer_id,

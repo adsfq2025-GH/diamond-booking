@@ -12,6 +12,8 @@ export interface DashboardContext {
   ownerName: string;
   ownerEmail: string;
   plan: PlanTier;
+  /** What this tenant is billed on today, per the Stripe webhook. */
+  billingCycle: "monthly" | "yearly";
   /** IANA timezone (e.g. "America/Los_Angeles"). All booking times render in it. */
   timezone: string;
   onboardingComplete: boolean;
@@ -231,6 +233,8 @@ export interface SubscriptionState {
   plan: PlanTier;
   status: import("@/types/database").SubscriptionStatus;
   priceMonthly: number;
+  /** What the tenant is actually billed on, per the Stripe webhook. */
+  billingCycle: "monthly" | "yearly";
   trialDaysLeft: number | null;
   paymentsEnabled: boolean;
 }

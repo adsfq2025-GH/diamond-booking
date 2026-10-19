@@ -42,6 +42,7 @@ export const getDashboardContext = cache(
       ownerName: profile?.full_name ?? "there",
       ownerEmail: profile?.email ?? "",
       plan: DEFAULT_PLAN,
+      billingCycle: "monthly",
       timezone: DEFAULT_TIMEZONE,
       onboardingComplete: false,
       trialDaysLeft: null,
@@ -53,7 +54,7 @@ export const getDashboardContext = cache(
     const supabase = await createClient();
     const { data: tenant } = await supabase
       .from("tenants")
-      .select("name, plan, timezone, settings, trial_ends_at, subscription_status")
+      .select("name, plan, timezone, settings, trial_ends_at, subscription_status, billing_cycle")
       .eq("id", profile.tenant_id)
       .maybeSingle();
     if (!tenant) return base;
@@ -63,6 +64,7 @@ export const getDashboardContext = cache(
       ...base,
       tenantName: tenant.name,
       plan: tenant.plan as PlanTier,
+      billingCycle: (tenant.billing_cycle ?? "monthly") as "monthly" | "yearly",
       timezone: tenant.timezone || DEFAULT_TIMEZONE,
       onboardingComplete: Boolean(settings.onboarding_complete),
       trialDaysLeft:
@@ -650,7 +652,7 @@ export const getPaymentsData = cache(async (): Promise<PaymentsData> => {
     supabase.from("payments").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }),
     lookupCustomerNames(supabase, tenantId),
     supabase.from("invoices").select("id, number").eq("tenant_id", tenantId),
-    supabase.from("tenants").select("plan, subscription_status, trial_ends_at, settings").eq("id", tenantId).maybeSingle(),
+    supabase.from("tenants").select("plan, subscription_status, trial_ends_at, settings, billing_cycle").eq("id", tenantId).maybeSingle(),
   ]);
   const invMap = new Map((invRes.data ?? []).map((i) => [i.id, i.number]));
   const payments = (payRes.data ?? []).map((p) => ({
@@ -674,6 +676,7 @@ export const getPaymentsData = cache(async (): Promise<PaymentsData> => {
       plan,
       status: (tenant?.subscription_status ?? "trialing") as PaymentsData["subscription"]["status"],
       priceMonthly: PLANS[plan].priceMonthly,
+      billingCycle: (tenant?.billing_cycle ?? "monthly") as "monthly" | "yearly",
       trialDaysLeft:
         tenant?.subscription_status === "trialing"
           ? trialDaysRemaining(tenant?.trial_ends_at ?? null)
