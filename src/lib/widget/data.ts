@@ -689,9 +689,19 @@ export async function createWidgetBooking(
       await createCalendarEventForBooking(result.booking_id).catch(() => {});
     }
 
+    // Deposits (A12). Online capture is NOT implemented: there is no Stripe.js,
+    // no Elements and no confirmation step in the booking flow. Creating a
+    // PaymentIntent here produced a client secret nothing could ever confirm —
+    // a stream of abandoned intents in the owner's Stripe dashboard, and a
+    // "deposit intent created successfully" message that read like a payment.
+    //
+    // So nothing is charged, the booking says so plainly, and the intent is
+    // only created once a publishable key exists for the browser to confirm it
+    // with. Until then the deposit is owed to the business, not to us.
     const paymentsEnabled = tenantSettings.payments_enabled === true;
     const chargesEnabled = Boolean(tenantRow?.stripe_charges_enabled);
-    if (paymentsEnabled && chargesEnabled && result.deposit_cents > 0 && svc) {
+    const captureWired = Boolean(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
+    if (paymentsEnabled && chargesEnabled && captureWired && result.deposit_cents > 0 && svc) {
       const paymentIntent = await createDepositIntent({
         amountCents: result.deposit_cents,
         tenantId: bookingRow.tenant_id,

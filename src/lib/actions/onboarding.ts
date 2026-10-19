@@ -42,29 +42,22 @@ async function ownerContext() {
 
 type OwnerCtx = Awaited<ReturnType<typeof ownerContext>>;
 
-/** Merge new keys into tenants.settings (jsonb) without dropping others. */
+/**
+ * Merge new keys into tenants.settings (jsonb) without dropping others.
+ *
+ * Done in SQL (merge_tenant_settings, 0010) rather than read-modify-write in
+ * JS: the old version read the row, spread a patch over it here and wrote the
+ * whole object back, so two concurrent saves lost one patch (A39).
+ */
 async function mergeSettings(
   ctx: OwnerCtx,
   patch: TenantSettings,
   minStep?: number,
 ): Promise<void> {
-  const { data: tenant, error: readError } = await ctx.supabase
-    .from("tenants")
-    .select("settings")
-    .eq("id", ctx.tenantId)
-    .single();
-  if (readError) throw readError;
-
-  const current = (tenant.settings ?? {}) as TenantSettings;
-  const next: TenantSettings = { ...current, ...patch };
-  if (minStep !== undefined) {
-    next.onboarding_step = Math.max(Number(current.onboarding_step ?? 1), minStep);
-  }
-
-  const { error } = await ctx.supabase
-    .from("tenants")
-    .update({ settings: next as unknown as Json })
-    .eq("id", ctx.tenantId);
+  const { error } = await ctx.supabase.rpc("merge_tenant_settings", {
+    p_patch: patch as unknown as Json,
+    p_min_step: minStep ?? null,
+  });
   if (error) throw error;
 }
 

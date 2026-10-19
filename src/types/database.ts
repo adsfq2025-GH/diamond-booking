@@ -1206,6 +1206,10 @@ export interface Database {
           total_cents?: number;
         };
       };
+      merge_tenant_settings: {
+        Args: { p_patch: Json; p_min_step?: number | null };
+        Returns: Json;
+      };
       booking_duration_minutes: {
         Args: {
           p_service_id: string;

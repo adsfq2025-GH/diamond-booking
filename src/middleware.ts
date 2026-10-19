@@ -83,7 +83,15 @@ export async function middleware(request: NextRequest) {
   }
 
   // Role comes from the user's profile; JWT app_metadata is the fallback
-  // (set at signup) so a missing/slow profile read doesn't lock users out.
+  // (set at signup and on invitation acceptance) so a missing or slow profile
+  // read doesn't lock users out.
+  //
+  // Note on cost: this query runs only for the protected prefixes above —
+  // `matchProtected` returns early for marketing, /book and /login — so it is
+  // per dashboard/portal/admin request, not per request. Profile-first is kept
+  // deliberately: the JWT claim can be stale (a teammate accepting an
+  // invitation changes profiles.role), and routing someone by a stale claim
+  // would strand them in the wrong area.
   let role: UserRole | null = null;
   const { data: profile } = await supabase
     .from("profiles")

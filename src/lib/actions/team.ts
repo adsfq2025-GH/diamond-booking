@@ -201,7 +201,31 @@ export async function acceptInvitation(
     return { ok: false, error: "Invitations are unavailable right now." };
   }
   const supabase = await createClient();
-  const { error } = await supabase.rpc("accept_employee_invitation", { p_token: token });
+  const { data, error } = await supabase.rpc("accept_employee_invitation", {
+    p_token: token,
+  });
+  if (!error) {
+    // Keep app_metadata.role in step with profiles.role. The middleware reads
+    // the profile first and only falls back to the JWT claim, but leaving a
+    // stale "customer" claim behind would strand this user in /portal on any
+    // request where the profile read fails.
+    const accepted = data as unknown as { tenant_id?: string } | null;
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user && accepted?.tenant_id) {
+        const admin = createAdminClient();
+        await admin.auth.admin.updateUserById(user.id, {
+          app_metadata: { ...(user.app_metadata ?? {}), role: "employee" },
+        });
+      }
+    } catch (err) {
+      // Not fatal: the profile is already an employee, which is what RLS and
+      // the middleware's primary path both use.
+      console.error("acceptInvitation: could not sync app_metadata", err);
+    }
+  }
   if (error) {
     const code = error.message.toLowerCase();
     if (code.includes("not_signed_in")) {

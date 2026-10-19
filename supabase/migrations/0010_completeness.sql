@@ -485,3 +485,47 @@ end;
 $$;
 
 grant execute on function public.apply_coupon_to_booking(text, uuid, text) to anon, authenticated;
+
+-- ------------------------------------------------------------
+-- A39 — atomic tenant settings merge
+-- ------------------------------------------------------------
+-- mergeSettings() read tenants.settings, spread a patch over it in JS and
+-- wrote the whole object back. Two concurrent saves lose one patch. Doing the
+-- merge in SQL makes it a single statement against the current row.
+create or replace function public.merge_tenant_settings(
+  p_patch jsonb,
+  p_min_step int default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tenant uuid := public.auth_tenant();
+  v_role public.user_role := public.auth_role();
+  v_settings jsonb;
+begin
+  if v_role not in ('business_owner', 'super_admin') or v_tenant is null then
+    raise exception 'not_authorized' using errcode = '42501';
+  end if;
+
+  update public.tenants t
+     set settings = (
+       coalesce(t.settings, '{}'::jsonb) || coalesce(p_patch, '{}'::jsonb)
+       || case
+            when p_min_step is null then '{}'::jsonb
+            else jsonb_build_object(
+              'onboarding_step',
+              greatest(coalesce((t.settings ->> 'onboarding_step')::int, 1), p_min_step)
+            )
+          end
+     )
+   where t.id = v_tenant
+   returning t.settings into v_settings;
+
+  return coalesce(v_settings, '{}'::jsonb);
+end;
+$$;
+
+grant execute on function public.merge_tenant_settings(jsonb, int) to authenticated;
