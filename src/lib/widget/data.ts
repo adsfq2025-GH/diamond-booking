@@ -695,12 +695,19 @@ export async function createWidgetBooking(
     // a stream of abandoned intents in the owner's Stripe dashboard, and a
     // "deposit intent created successfully" message that read like a payment.
     //
-    // So nothing is charged, the booking says so plainly, and the intent is
-    // only created once a publishable key exists for the browser to confirm it
-    // with. Until then the deposit is owed to the business, not to us.
+    // So nothing is charged, the booking says so plainly, and no intent is
+    // created at all until capture is EXPLICITLY switched on.
+    //
+    // The gate is a dedicated flag, not the presence of a publishable key: that
+    // key has to be set for anything else Stripe.js does, and using it here
+    // would silently re-create unconfirmable intents the moment someone
+    // configured Stripe properly. Only set STRIPE_DEPOSIT_CAPTURE_ENABLED=true
+    // once the booking flow actually confirms the intent in the browser.
     const paymentsEnabled = tenantSettings.payments_enabled === true;
     const chargesEnabled = Boolean(tenantRow?.stripe_charges_enabled);
-    const captureWired = Boolean(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
+    const captureWired =
+      process.env.STRIPE_DEPOSIT_CAPTURE_ENABLED === "true" &&
+      Boolean(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
     if (paymentsEnabled && chargesEnabled && captureWired && result.deposit_cents > 0 && svc) {
       const paymentIntent = await createDepositIntent({
         amountCents: result.deposit_cents,
