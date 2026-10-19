@@ -26,3 +26,26 @@ export function supabaseEnvConfigured(): boolean {
   }
   return true;
 }
+
+/**
+ * Is the degraded "placeholder" behaviour allowed to take effect? (A36)
+ *
+ * Placeholder mode skips route protection entirely, resolves any widget key to
+ * the demo business and returns synthetic "confirmed" bookings without writing
+ * anything. That is fine locally. In production it would mean one malformed
+ * Supabase variable silently turns the deployment into an unprotected demo
+ * that tells real customers their bookings succeeded — so there it must be
+ * opted into explicitly, and otherwise the app fails closed.
+ */
+export function placeholderModeAllowed(): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  return process.env.ALLOW_PLACEHOLDER_MODE === "true";
+}
+
+/**
+ * True when the app is misconfigured in a way it must not serve through:
+ * production, no real Supabase keys, and no explicit opt-in.
+ */
+export function misconfiguredForProduction(): boolean {
+  return !supabaseEnvConfigured() && !placeholderModeAllowed();
+}

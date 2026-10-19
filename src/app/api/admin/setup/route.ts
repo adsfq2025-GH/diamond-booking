@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { secretsMatch } from "@/lib/signed-state";
 import { createAdminClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
 import type { UserRole } from "@/types/database";
@@ -11,11 +12,21 @@ import type { UserRole } from "@/types/database";
  *   SUPER_ADMIN_EMAIL=you@example.com
  *   SUPER_ADMIN_PASSWORD=a-strong-password
  *
- * Then visit  {APP_URL}/api/admin/setup  once (GET or POST). Idempotent: change
- * the env password and hit it again to rotate. It only ever touches the one
- * env-defined account, so no one who hits it gains access — they'd need the
- * password, which lives only in your environment. Sign in at /login with those
- * credentials to reach /admin.
+ * The endpoint is DISABLED unless you also set a one-time token:
+ *
+ *   SUPER_ADMIN_SETUP_TOKEN=<long random string>
+ *
+ * Then call it once with that token and remove the variable again:
+ *
+ *   curl -X POST "{APP_URL}/api/admin/setup" -H "x-setup-token: <token>"
+ *
+ * Idempotent: change the env password and call it again to rotate. Sign in at
+ * /login with those credentials to reach /admin.
+ *
+ * Why the token, given the endpoint only ever writes the password already in
+ * the environment: without it, any anonymous caller could silently revert a
+ * password you had rotated in the UI, and each call pages through up to 5,000
+ * auth users — a free amplification primitive against the Auth API.
  */
 
 type SetupResult = { status: number; body: Record<string, unknown> };
@@ -107,11 +118,31 @@ async function findUserByEmail(
   return null;
 }
 
-export async function GET() {
+/**
+ * Authorize the caller, then run the bootstrap. Unauthorized callers get a
+ * flat 404 so the route is not discoverable, and every attempt is logged.
+ */
+async function handle(req: NextRequest): Promise<NextResponse> {
+  const expected = process.env.SUPER_ADMIN_SETUP_TOKEN;
+  const presented =
+    req.headers.get("x-setup-token") ?? req.nextUrl.searchParams.get("token");
+
+  if (!expected || !secretsMatch(presented, expected)) {
+    console.warn(
+      "[admin setup] rejected call",
+      expected ? "(bad or missing token)" : "(SUPER_ADMIN_SETUP_TOKEN not set — route disabled)",
+    );
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const r = await ensureSuperAdmin();
+  console.warn("[admin setup] authorized call completed with status", r.status);
   return NextResponse.json(r.body, { status: r.status });
 }
-export async function POST() {
-  const r = await ensureSuperAdmin();
-  return NextResponse.json(r.body, { status: r.status });
+
+export async function GET(req: NextRequest) {
+  return handle(req);
+}
+export async function POST(req: NextRequest) {
+  return handle(req);
 }

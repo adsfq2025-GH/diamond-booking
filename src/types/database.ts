@@ -683,6 +683,29 @@ export interface Database {
         };
         Relationships: [];
       };
+      tenant_secrets: {
+        // Integration credentials. RLS on, NO policies: service role only.
+        // See supabase/migrations/0007_security.sql.
+        Row: {
+          tenant_id: string;
+          email: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tenant_id: string;
+          email?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          tenant_id?: string;
+          email?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       booking_reminders: {
         Row: {
           id: string;

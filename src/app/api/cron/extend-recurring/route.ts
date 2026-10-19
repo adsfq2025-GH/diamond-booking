@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
+import { secretsMatch } from "@/lib/signed-state";
 import {
   computeOccurrences,
   DEFAULT_MAX_OCCURRENCES,
@@ -15,7 +16,8 @@ import {
  * unauthenticated); cancelling a series makes its latest occurrence "cancelled"
  * which excludes it here, so cancellation stops renewal automatically.
  *
- * Protect by setting CRON_SECRET; Vercel Cron sends it as a Bearer token.
+ * CRON_SECRET is REQUIRED: without it this route returns 401 to everyone.
+ * Vercel Cron sends it as a Bearer token.
  */
 const RENEW_THRESHOLD = 6;
 
@@ -27,12 +29,12 @@ export async function POST(req: NextRequest) {
 }
 
 async function run(req: NextRequest) {
+  // Fail CLOSED. This endpoint performs service-role writes across tenants;
+  // the previous `if (secret)` guard meant an unset CRON_SECRET left it open
+  // to anonymous callers.
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!secret || !secretsMatch(req.headers.get("authorization"), `Bearer ${secret}`)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!supabaseEnvConfigured()) {
     return NextResponse.json({ error: "Supabase not configured" }, { status: 503 });

@@ -351,12 +351,13 @@ import type {
   WidgetData,
 } from "./types";
 import { PLANS } from "@/lib/plans";
+import { readTenantEmailConfig } from "@/lib/integrations/email";
 
 async function tenantScope() {
   const profile = await getProfile();
   if (!profile?.tenant_id) return null;
   const supabase = await createClient();
-  return { supabase, tenantId: profile.tenant_id };
+  return { supabase, tenantId: profile.tenant_id, profile };
 }
 
 export const getServices = cache(async (): Promise<ServiceView[]> => {
@@ -889,8 +890,11 @@ export const getEmailSettings = cache(async (): Promise<EmailSettingsView> => {
   const scope = await tenantScope();
   if (!scope) return base;
   const { supabase, tenantId } = scope;
-  const { data } = await supabase.from("tenants").select("settings, name").eq("id", tenantId).maybeSingle();
-  const email = ((data?.settings ?? {}) as { email?: Record<string, unknown> }).email;
+  const { data } = await supabase.from("tenants").select("name").eq("id", tenantId).maybeSingle();
+  // Credentials live in tenant_secrets (service-role only) — see 0007_security.sql.
+  // The owner is already authenticated and tenant-scoped by tenantScope() above;
+  // only non-secret fields are returned to the client (hasPassword, never pass).
+  const email = await readTenantEmailConfig(tenantId);
   const smtp = (email?.smtp ?? {}) as Record<string, unknown>;
   return {
     provider: (email?.provider as EmailSettingsView["provider"]) ?? (resendAvailable ? "resend" : "off"),
@@ -950,7 +954,9 @@ export const getIntegrationConnections = cache(async (): Promise<IntegrationConn
   const { supabase, tenantId } = scope;
   const [{ data: tenant }, { data: calendar }] = await Promise.all([
     supabase.from("tenants").select("settings, stripe_connect_account_id, stripe_charges_enabled, stripe_payouts_enabled").eq("id", tenantId).maybeSingle(),
-    supabase.from("google_calendar_connections").select("email, sync_enabled").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    // Own connection only: tokens are own-row under RLS since 0007_security.sql,
+    // and "is MY calendar connected?" is the question this panel asks.
+    supabase.from("google_calendar_connections").select("email, sync_enabled").eq("tenant_id", tenantId).eq("profile_id", scope.profile.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const notifications = ((tenant?.settings ?? {}) as { notifications?: Record<string, unknown> }).notifications ?? {};
   return {

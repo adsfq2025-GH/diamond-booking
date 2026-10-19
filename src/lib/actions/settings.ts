@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
 import { sendTestEmail } from "@/lib/integrations/email";
 import { smsConfigured } from "@/lib/integrations/sms";
@@ -66,7 +66,14 @@ export interface EmailSettingsInput {
   fromEmail: string;
 }
 
-/** Persist the tenant's email settings (SMTP creds live in tenant.settings.email). */
+/**
+ * Persist the tenant's email settings.
+ *
+ * SMTP credentials live in public.tenant_secrets (RLS on, no policies →
+ * service role only). They used to live in tenants.settings.email, which the
+ * tenants_select policy exposes to every employee and customer of the tenant,
+ * so any portal customer could read the owner's mail password.
+ */
 export async function saveEmailSettings(
   input: EmailSettingsInput,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -76,14 +83,19 @@ export async function saveEmailSettings(
   const profile = await requireRole("business_owner");
   if (!profile.tenant_id) return { ok: false, error: "No business found." };
 
-  const supabase = await createClient();
-  const { data: tenant } = await supabase
-    .from("tenants")
-    .select("settings")
-    .eq("id", profile.tenant_id)
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { ok: false, error: "Email settings are unavailable: the server is missing its service-role key." };
+  }
+
+  const { data: existing } = await admin
+    .from("tenant_secrets")
+    .select("email")
+    .eq("tenant_id", profile.tenant_id)
     .maybeSingle();
-  const settings = (tenant?.settings ?? {}) as Record<string, unknown>;
-  const prevEmail = (settings.email ?? {}) as { smtp?: { pass?: string } };
+  const prevEmail = (existing?.email ?? {}) as { smtp?: { pass?: string } };
   const prevPass = prevEmail.smtp?.pass ?? "";
 
   if (input.provider === "smtp") {
@@ -108,10 +120,16 @@ export async function saveEmailSettings(
     },
   };
 
-  const { error } = await supabase
-    .from("tenants")
-    .update({ settings: { ...settings, email } as Json })
-    .eq("id", profile.tenant_id);
+  const { error } = await admin
+    .from("tenant_secrets")
+    .upsert(
+      {
+        tenant_id: profile.tenant_id,
+        email: email as Json,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "tenant_id" },
+    );
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/dashboard/settings");

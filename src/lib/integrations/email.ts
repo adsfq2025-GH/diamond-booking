@@ -54,7 +54,12 @@ type SendResult =
 
 // ---------- per-tenant SMTP ----------
 
-/** Stored in tenant.settings.email. The password is server-only, never sent to the client. */
+/**
+ * Stored in public.tenant_secrets.email — a table with RLS enabled and no
+ * policies, so only the service role can reach it. It used to live in
+ * tenants.settings, which every employee and customer of the tenant can read.
+ * The password is server-only and never sent to the client.
+ */
 export interface TenantSmtp {
   host: string;
   port: number;
@@ -99,12 +104,16 @@ async function sendViaSmtp(
 }
 
 /** Read a tenant's stored email config (server-only; uses the service role). */
-async function readTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig | null> {
+export async function readTenantEmailConfig(tenantId: string): Promise<TenantEmailConfig | null> {
   try {
     const admin = createAdminClient();
-    const { data } = await admin.from("tenants").select("settings").eq("id", tenantId).maybeSingle();
-    const settings = (data?.settings ?? {}) as { email?: TenantEmailConfig };
-    return settings.email ?? null;
+    const { data } = await admin
+      .from("tenant_secrets")
+      .select("email")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    const email = (data?.email ?? null) as TenantEmailConfig | null;
+    return email && Object.keys(email).length > 0 ? email : null;
   } catch {
     return null; // no service-role key configured
   }

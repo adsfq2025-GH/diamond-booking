@@ -1,4 +1,25 @@
 -- ============================================================
+-- SAFETY GUARD (A37) — this file inserts working accounts whose password is
+-- published in the comment below, straight into auth.users. It is for a fresh
+-- LOCAL database only. Refuse to run anywhere that already holds real data.
+-- ============================================================
+do $$
+begin
+  if exists (select 1 from public.tenants where slug <> 'clean-sweep') then
+    raise exception
+      'seed.sql refused: this database already contains real tenants. Demo credentials must never be created in staging or production.';
+  end if;
+  if exists (
+    select 1 from auth.users
+    where email not like '%@cleansweep.demo'
+      and email not like '%@customer.demo'
+  ) then
+    raise exception
+      'seed.sql refused: this database already contains real users. Demo credentials must never be created in staging or production.';
+  end if;
+end $$;
+
+-- ============================================================
 -- Diamond Booking — seed.sql (local dev / demo data)
 -- Demo tenant: Clean Sweep Services (cleaning industry)
 -- All demo logins use password: password123

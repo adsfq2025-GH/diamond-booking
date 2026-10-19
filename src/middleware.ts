@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
-import { supabaseEnvConfigured } from "@/lib/env";
+import { misconfiguredForProduction, supabaseEnvConfigured } from "@/lib/env";
 import type { UserRole } from "@/types/database";
 
 /**
@@ -44,11 +44,20 @@ function matchProtected(pathname: string) {
 }
 
 export async function middleware(request: NextRequest) {
-  // PLACEHOLDER-ENV PREVIEW MODE: when .env.local still holds the local
-  // placeholder Supabase keys there is no backend to authenticate against,
-  // so route protection is skipped entirely. The protected pages themselves
-  // detect the same condition (supabaseEnvConfigured) and render mock data.
-  // With real keys this branch never runs.
+  // Misconfigured production: no real Supabase keys and no explicit opt-in to
+  // placeholder mode. Fail CLOSED rather than serving an unprotected demo that
+  // tells real customers their bookings succeeded. (A36)
+  if (misconfiguredForProduction()) {
+    return new NextResponse(
+      "This deployment is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  }
+
+  // PLACEHOLDER-ENV PREVIEW MODE (local/dev only, or an explicit
+  // ALLOW_PLACEHOLDER_MODE=true): there is no backend to authenticate
+  // against, so route protection is skipped and the protected pages render
+  // mock data. With real keys this branch never runs.
   if (!supabaseEnvConfigured()) {
     return NextResponse.next();
   }
