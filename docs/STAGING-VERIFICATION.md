@@ -43,6 +43,16 @@
 >    This is live on production right now.
 > 6. Apply **`0011_billing_cycle.sql`** when you deploy annual billing.
 >
+> **Vercel Hobby rejects sub-daily crons, and it rejects the whole
+> deployment.** `vercel.json` asked for `*/15 * * * *` on
+> `/api/cron/send-reminders`, and every deploy failed with "Hobby accounts are
+> limited to daily cron jobs" before building anything — no env var or code
+> change could get past it. The reminder schedule now lives in
+> `.github/workflows/send-reminders.yml` (free, every 15 minutes, calls the
+> route with `Authorization: Bearer $CRON_SECRET`). It needs two repository
+> secrets, `CRON_SECRET` and `APP_URL`. `extend-recurring` stays in
+> `vercel.json` because daily is all it needs.
+>
 > Keep the rest of this document for the next environment you set up.
 
 This is the runbook for taking the audit fixes from "committed" to "verified."

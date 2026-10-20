@@ -1,0 +1,77 @@
+# ============================================================
+# Booking reminders, every 15 minutes.
+#
+# Why this exists rather than a Vercel cron: Vercel's Hobby plan allows one
+# cron run per day, and it REJECTS THE WHOLE DEPLOYMENT if vercel.json asks
+# for more ("Hobby accounts are limited to daily cron jobs"). A reminder
+# sender that runs daily is not a reminder sender, so the schedule lives
+# here instead. /api/cron/extend-recurring stays in vercel.json because
+# once a day is genuinely all it needs.
+#
+# Setup — two repository secrets (Settings -> Secrets and variables ->
+# Actions -> New repository secret):
+#
+#   CRON_SECRET   the same value as in Vercel's env vars. Must match exactly
+#                 or every run gets a 401.
+#   APP_URL       the production origin, e.g. https://diamond-booking.com
+#                 No trailing slash.
+#
+# Caveats worth knowing:
+#   - GitHub's scheduler is best-effort. Under load, runs can be minutes
+#     late and an occasional one is skipped. Reminders are time-windowed
+#     ("scheduled_for <= now"), not fired exactly on the tick, so a late run
+#     still sends; it just sends late.
+#   - Scheduled workflows only run from the DEFAULT branch.
+#   - GitHub disables scheduled workflows after 60 days with no repository
+#     activity, and emails the owner. If reminders go quiet, check that first.
+# ============================================================
+name: Send booking reminders
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {} # lets you trigger a run by hand to test it
+
+# Never let a slow run overlap the next tick: the route claims up to 50
+# pending reminders per call, and two concurrent claims could double-send.
+concurrency:
+  group: send-reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the reminder endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::APP_URL and CRON_SECRET repository secrets must both be set."
+            exit 1
+          fi
+
+          # --fail-with-body so a non-2xx is a failed job AND we see why.
+          # The secret goes in a header from the environment, so it never
+          # appears in the command line or the run log.
+          code=$(curl --silent --show-error --fail-with-body \
+                      --max-time 120 --retry 2 --retry-delay 10 \
+                      -o response.json -w '%{http_code}' \
+                      -H "Authorization: Bearer ${CRON_SECRET}" \
+                      "${APP_URL%/}/api/cron/send-reminders") || true
+
+          echo "HTTP $code"
+          head -c 2000 response.json || true
+          echo
+
+          case "$code" in
+            200) ;;
+            401) echo "::error::401 — CRON_SECRET here does not match the one in Vercel."; exit 1 ;;
+            404) echo "::error::404 — is APP_URL right, and is the new build deployed?"; exit 1 ;;
+            503) echo "::error::503 — the deployment is not configured (Supabase env vars missing in Vercel)."; exit 1 ;;
+            *)   echo "::error::Unexpected HTTP $code from the reminder endpoint."; exit 1 ;;
+          esac
