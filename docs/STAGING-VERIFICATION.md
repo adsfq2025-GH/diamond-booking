@@ -9,7 +9,22 @@
 >    the one migration that moved existing data and deleted the original — it
 >    copied `tenants.settings->'email'` into `tenant_secrets` and stripped the
 >    key — so confirm the move landed before anything else.
-> 2. **Deploy the new build.** The SQL is live and the code is not, which is a
+> 2. **Set the production env vars in Vercel FIRST, then deploy.** This order
+>    is not cosmetic. `src/middleware.ts` matches every non-static path and its
+>    first branch is `misconfiguredForProduction()`, which returns a plain-text
+>    **503 for the whole site** when `NEXT_PUBLIC_SUPABASE_URL` or
+>    `NEXT_PUBLIC_SUPABASE_ANON_KEY` is absent in production (A36, failing
+>    closed on purpose). Deploying before the vars are set takes the entire
+>    site down rather than half-working. Note the build itself succeeds with no
+>    env at all — verified by building with `.env.local` removed — so a green
+>    build is no evidence the vars are set.
+>
+>    `NEXT_PUBLIC_APP_URL` must be the production URL; copying the local value
+>    (`http://localhost:3000`) silently breaks embed snippets and OAuth
+>    redirects. Set `CRON_SECRET` or both cron routes in `vercel.json` are
+>    unauthenticated. Never set `ALLOW_PLACEHOLDER_MODE`.
+>
+>    Deploying matters because the SQL is live and the code is not, which is a
 >    worse state than either alone: the old build reads tenant SMTP from the
 >    location 0007 just emptied, and *writes credentials back there* if an owner
 >    re-saves email settings. Section 5 of `04_production_integrity.sql`
