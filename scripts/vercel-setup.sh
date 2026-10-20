@@ -2,7 +2,8 @@
 # ============================================================
 # Diamond Booking — push production env vars to Vercel, then deploy.
 #
-#   ./scripts/vercel-setup.sh https://your-real-domain.com
+#   ./scripts/vercel-setup.sh                      (asks for the URL)
+#   ./scripts/vercel-setup.sh https://your-domain.com   (or pass it)
 #
 # Reads values from .env.local and pipes them to `vercel env add` on stdin.
 # Values are never printed, never echoed, and never put on a command line
@@ -18,19 +19,8 @@ APP_URL="${1:-}"
 die() { printf '\nERROR: %s\n' "$1" >&2; exit 1; }
 
 # ---- preconditions -----------------------------------------------------
-[ -n "$APP_URL" ] || die "Pass your production URL:
-    ./scripts/vercel-setup.sh https://your-real-domain.com
-This becomes NEXT_PUBLIC_APP_URL. It is baked into embed snippets and OAuth
-redirects, so a wrong value breaks the booking widget and Google Calendar."
-
-case "$APP_URL" in
-  http://localhost*|https://localhost*|*127.0.0.1*)
-    die "'$APP_URL' is a local address. NEXT_PUBLIC_APP_URL must be the real
-production URL or every embed snippet you hand a customer points at your
-own laptop." ;;
-  https://*) : ;;
-  *) die "'$APP_URL' must start with https://" ;;
-esac
+# NEXT_PUBLIC_APP_URL is checked after linking, where the CLI can list the
+# project's real domains instead of making you remember one.
 
 [ -f .env.local ] || die ".env.local not found. Run this from the repo root."
 
@@ -60,6 +50,39 @@ if ! grep -q '"projectId"' .vercel/project.json 2>/dev/null; then
 fi
 
 grep -q '"projectId"' .vercel/project.json || die "Linking did not complete."
+
+# ---- which URL is production? -----------------------------------------
+# This value is baked into embed snippets and OAuth redirects, so a wrong
+# one breaks the booking widget and Google Calendar connect — silently, and
+# only for customers. Worth getting right rather than guessing.
+validate_url() {
+  case "$1" in
+    ""|*" "*)                                  return 1 ;;
+    http://localhost*|https://localhost*|*127.0.0.1*) return 1 ;;
+    https://*.*)                               return 0 ;;
+    *)                                         return 1 ;;
+  esac
+}
+
+if ! validate_url "${APP_URL:-}"; then
+  [ -z "${APP_URL:-}" ] || echo "'$APP_URL' is not a usable production URL."
+  echo
+  echo "Domains Vercel has for this project:"
+  # Both are listed: an alias is what a custom domain resolves to, and a
+  # project can have either, neither, or several.
+  npx --no-install vercel alias ls 2>/dev/null | grep -oE '[a-z0-9.-]+\.[a-z]{2,}' | sort -u | sed 's/^/  /' || true
+  npx --no-install vercel domains ls 2>/dev/null | grep -oE '[a-z0-9.-]+\.[a-z]{2,}' | sort -u | sed 's/^/  /' || true
+  echo
+  echo "Pick the one customers actually visit. If the list is empty or wrong,"
+  echo "copy it from your Vercel dashboard (Project -> Domains)."
+  echo
+  while ! validate_url "${APP_URL:-}"; do
+    read -r -p "Production URL (https://...): " APP_URL
+    validate_url "$APP_URL" || echo "  Needs to be https:// with a real domain, not localhost."
+  done
+fi
+
+echo "Using NEXT_PUBLIC_APP_URL=$APP_URL"
 
 # ---- what goes up ------------------------------------------------------
 # Copied verbatim from .env.local.
