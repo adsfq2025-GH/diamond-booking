@@ -37,9 +37,25 @@ fi
 
 echo "Logged in to Vercel as: $(npx --no-install vercel whoami 2>/dev/null | tail -1)"
 
-# A project.json written by an IDE often has only projectName, which is not
-# enough for the CLI. projectId is what actually identifies the project.
-if ! grep -q '"projectId"' .vercel/project.json 2>/dev/null; then
+# `vercel link` writes ONE OF TWO shapes, and a check for only the first
+# rejects a perfectly good link:
+#
+#   .vercel/project.json   {"projectId": ..., "orgId": ...}
+#                          a directory linked straight to a project.
+#   .vercel/repo.json      {"projects": [{"id": ..., "orgId": ...}]}
+#                          a repository-level link, which is what you get
+#                          when the project is already connected to the git
+#                          repo ("linked by git").
+#
+# An IDE may also leave a project.json holding only projectName, which looks
+# linked and is not: projectId is what identifies a project.
+linked() {
+  grep -q '"projectId"' .vercel/project.json 2>/dev/null && return 0
+  grep -q '"id"'        .vercel/repo.json    2>/dev/null && return 0
+  return 1
+}
+
+if ! linked; then
   echo
   echo "This folder is not fully linked to a Vercel project."
   echo "Running 'vercel link' — pick the EXISTING project that serves your"
@@ -49,7 +65,12 @@ if ! grep -q '"projectId"' .vercel/project.json 2>/dev/null; then
   npx --no-install vercel link
 fi
 
-grep -q '"projectId"' .vercel/project.json || die "Linking did not complete."
+linked || die "Linking did not complete. Run 'npx vercel link' on its own and
+pick the existing project, then re-run this script."
+
+if [ -f .vercel/repo.json ]; then
+  echo "Linked (repository-level): $(python -c 'import json;print(json.load(open(".vercel/repo.json"))["projects"][0]["name"])' 2>/dev/null || echo 'see .vercel/repo.json')"
+fi
 
 # ---- which URL is production? -----------------------------------------
 # This value is baked into embed snippets and OAuth redirects, so a wrong
