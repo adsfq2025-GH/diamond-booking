@@ -41,3 +41,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Added by `vercel link`.
+.vercel
+
+# Real secrets never go in the repo...
+.env*
+# ...but the template that documents which variables exist must.
+# `.env*` matches it, and a tracked file stays tracked, so this only
+# bites when someone re-adds it or adds a second template — silently.
+!.env.example
