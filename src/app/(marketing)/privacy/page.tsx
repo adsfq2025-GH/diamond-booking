@@ -94,15 +94,91 @@ const sections: LegalSection[] = [
     ],
   },
   {
+    // Required by Google before an app requesting sensitive scopes can pass
+    // OAuth verification. Google checks that the policy names the scopes, says
+    // what the data is used for, and reproduces the Limited Use commitment.
+    // Keep this in step with googleCalendarScopes() in
+    // src/lib/integrations/google-calendar.ts — a mismatch between the scopes
+    // requested and the scopes disclosed is a rejection.
+    id: "google-user-data",
+    heading: "Google Calendar data",
+    paragraphs: [
+      <>
+        Connecting a Google Calendar is <b>optional</b>. Diamond works fully
+        without it, and nothing below applies unless an account holder chooses
+        to connect their own calendar.
+      </>,
+      <>
+        <b>What we access.</b> When you connect, you grant Diamond these
+        permissions: your email address and basic profile (so we can show which
+        account is linked), <code>calendar.events</code> (to create, update,
+        and remove the calendar entries that correspond to your Diamond
+        bookings), and <code>calendar.readonly</code> (to read your existing
+        events so we do not book you into a time you are already busy).
+      </>,
+      <>
+        <b>What we do with it.</b> Exactly one thing: keeping your Diamond
+        schedule and your Google Calendar in agreement. We do not read your
+        calendar for any other purpose, we do not build a profile from it, and
+        we do not use it for advertising or to train any AI model — our own or
+        anyone else&rsquo;s.
+      </>,
+      <>
+        <b>What we store.</b> The OAuth tokens Google issues, the connected
+        account&rsquo;s email address, and the identifiers linking a Diamond
+        booking to its calendar event. We do not copy the contents of your
+        calendar into our database. Tokens are stored server-side, are never
+        exposed to the browser, and are readable only by the account that
+        created the connection.
+      </>,
+      <>
+        <b>Limited Use.</b> Diamond Booking&rsquo;s use and transfer of
+        information received from Google APIs adheres to the{" "}
+        <a
+          className="font-semibold text-blue-600 hover:underline"
+          href="https://developers.google.com/terms/api-services-user-data-policy"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Google API Services User Data Policy
+        </a>
+        , including the Limited Use requirements. We do not transfer this data
+        to third parties except as necessary to provide or improve the calendar
+        sync feature, to comply with applicable law, or as part of a merger or
+        acquisition. No human at Diamond reads your Google data except with
+        your explicit consent, to resolve a specific support request you have
+        raised, for security purposes such as investigating abuse, or where the
+        law requires it.
+      </>,
+      <>
+        <b>How to disconnect.</b> Disconnect the calendar in Diamond under
+        Settings, which deletes the stored tokens immediately, or revoke access
+        from Google&rsquo;s side at{" "}
+        <a
+          className="font-semibold text-blue-600 hover:underline"
+          href="https://myaccount.google.com/permissions"
+          target="_blank"
+          rel="noreferrer"
+        >
+          myaccount.google.com/permissions
+        </a>
+        . Revoking from either side stops the sync; calendar events already
+        created remain in your calendar for you to keep or delete.
+      </>,
+    ],
+  },
+  {
     id: "subprocessors",
     heading: "Sub-processors",
     paragraphs: [
       <>
         We rely on a short list of infrastructure providers to run Diamond:
         Supabase (database and authentication), Stripe (payments), Resend
-        (transactional email), and our cloud hosting provider. Each is bound
-        by a data processing agreement and processes data only on our
-        instructions. A current list is available on request at{" "}
+        (transactional email), Twilio (text-message reminders, where a business
+        enables them), Google (calendar sync, only for account holders who
+        connect a calendar), and Vercel (hosting). Each is bound by a data
+        processing agreement and processes data only on our instructions. A
+        current list is available on request at{" "}
         <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamondbooking.com">
           legal@diamondbooking.com
         </a>
