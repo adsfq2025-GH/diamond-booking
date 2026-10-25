@@ -40,12 +40,17 @@ function pricingSummary(s: Service): {
   const unit = s.pricing_unit ?? "flat";
   if (unit === "hourly") {
     const hours = Math.max(Number(s.minimum_hours ?? 1) || 1, 1);
+    // An hourly service with no minimum hours is charged exactly once
+    // (service_pricing_units returns 1), so calling it "per hour" would state
+    // a rate we do not bill. And `hourly` is 0009's column DEFAULT, not
+    // something an owner necessarily chose — every service on production
+    // carries it while being priced as a flat job. So the label is only shown
+    // when a real minimum makes the multiplication real; otherwise this reads
+    // as what it is, a flat total.
+    if (hours <= 1) return { totalCents: s.price_cents, note: null };
     return {
       totalCents: Math.round(s.price_cents * hours),
-      note:
-        hours > 1
-          ? `${money(s.price_cents)} per hour, ${hours}-hour minimum`
-          : `${money(s.price_cents)} per hour`,
+      note: `${money(s.price_cents)} per hour, ${hours}-hour minimum`,
     };
   }
   if (unit === "square_foot" || unit === "custom") {
