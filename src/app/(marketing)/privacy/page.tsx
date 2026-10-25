@@ -179,8 +179,8 @@ const sections: LegalSection[] = [
         connect a calendar), and Vercel (hosting). Each is bound by a data
         processing agreement and processes data only on our instructions. A
         current list is available on request at{" "}
-        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamondbooking.com">
-          legal@diamondbooking.com
+        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamond-booking.com">
+          legal@diamond-booking.com
         </a>
         .
       </>,
@@ -269,12 +269,12 @@ const sections: LegalSection[] = [
     paragraphs: [
       <>
         Privacy questions or requests:{" "}
-        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamondbooking.com">
-          legal@diamondbooking.com
+        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamond-booking.com">
+          legal@diamond-booking.com
         </a>
         . General support:{" "}
-        <a className="font-semibold text-blue-600 hover:underline" href="mailto:support@diamondbooking.com">
-          support@diamondbooking.com
+        <a className="font-semibold text-blue-600 hover:underline" href="mailto:support@diamond-booking.com">
+          support@diamond-booking.com
         </a>
         .
       </>,

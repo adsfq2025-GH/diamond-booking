@@ -109,10 +109,10 @@ export function LegalPage({
             <div className="mt-[clamp(40px,5vw,56px)] rounded-[14px] border border-line bg-surface-alt px-6 py-5 text-[0.85rem] leading-[1.7] text-ink-muted">
               Questions about this document? Write to{" "}
               <a
-                href="mailto:legal@diamondbooking.com"
+                href="mailto:legal@diamond-booking.com"
                 className="font-semibold text-blue-600 hover:underline"
               >
-                legal@diamondbooking.com
+                legal@diamond-booking.com
               </a>{" "}
               — a person reads every message.
             </div>

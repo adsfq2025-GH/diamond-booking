@@ -164,7 +164,7 @@ function BookingEngineMock() {
   return (
     <div className="relative">
       <div className={cn(panel, "max-w-[440px] min-[961px]:ml-auto")}>
-        <MockHeader title="Book a service" meta="clean-sweep.diamondbooking.com" pill="Live" />
+        <MockHeader title="Book a service" meta="diamond-booking.com/book/clean-sweep" pill="Live" />
         <div className="px-[22px] pt-[18px] pb-[22px]">
           <div className="mb-2.5 flex items-center justify-between rounded-[9px] border border-blue-600 bg-card px-3.5 py-[11px] text-[0.78rem] font-semibold shadow-[0_0_0_3px_rgb(46_134_193/0.13)]">
             <span>Recurring home cleaning · 2h</span>

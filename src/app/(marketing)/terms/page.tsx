@@ -48,8 +48,8 @@ const sections: LegalSection[] = [
         security of your credentials, and the actions of team members you
         invite. Role permissions (owner, staff, technician) exist to limit
         access — assign them thoughtfully. Tell us promptly at{" "}
-        <a className="font-semibold text-blue-600 hover:underline" href="mailto:support@diamondbooking.com">
-          support@diamondbooking.com
+        <a className="font-semibold text-blue-600 hover:underline" href="mailto:support@diamond-booking.com">
+          support@diamond-booking.com
         </a>{" "}
         if you suspect unauthorized use.
       </>,
@@ -198,8 +198,8 @@ const sections: LegalSection[] = [
         These Terms are governed by the laws of the State of Delaware,
         excluding its conflict-of-law rules, and disputes will be resolved in
         the state or federal courts located there. Questions:{" "}
-        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamondbooking.com">
-          legal@diamondbooking.com
+        <a className="font-semibold text-blue-600 hover:underline" href="mailto:legal@diamond-booking.com">
+          legal@diamond-booking.com
         </a>
         .
       </>,

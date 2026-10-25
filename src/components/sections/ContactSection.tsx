@@ -81,10 +81,10 @@ function SuccessPanel({ email }: { email: string }) {
         <b className="font-semibold text-ink">{email}</b> within 4 business
         hours. If it&rsquo;s urgent, the fastest route is{" "}
         <a
-          href="mailto:support@diamondbooking.com"
+          href="mailto:support@diamond-booking.com"
           className="font-semibold text-blue-600 hover:underline"
         >
-          support@diamondbooking.com
+          support@diamond-booking.com
         </a>
         .
       </p>
@@ -178,10 +178,10 @@ export function ContactSection() {
               </span>
               <div>
                 <a
-                  href="mailto:support@diamondbooking.com"
+                  href="mailto:support@diamond-booking.com"
                   className="text-[0.95rem] font-bold text-ink transition-colors hover:text-blue-600"
                 >
-                  support@diamondbooking.com
+                  support@diamond-booking.com
                 </a>
                 <div className="text-[0.78rem] text-ink-faint">
                   Median first reply: under 4 business hours
