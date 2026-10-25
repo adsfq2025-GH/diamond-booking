@@ -76,6 +76,17 @@ export interface WidgetBookingResult {
   deposit_cents: number;
   /** Coupon discount applied after creation, if any. */
   discount_cents?: number;
+  /** What the price was calculated on: flat | hourly | square_foot | custom. */
+  pricing_unit?: string;
+  /** Units charged for — an hourly service bills at least its minimum (B06). */
+  pricing_quantity?: number;
+  /**
+   * Whether the confirmation email was actually accepted by the provider.
+   * The confirmation screen used to decide this from whether a sender was
+   * configured, so a failed send still told the customer to check their inbox.
+   * undefined means "no attempt was made".
+   */
+  confirmation_sent?: boolean;
   deposit_client_secret?: string | null;
   deposit_payment_intent_id?: string | null;
   /**
@@ -86,6 +97,8 @@ export interface WidgetBookingResult {
   recurrence?: {
     reserved: number;
     skipped: string[];
+    /** The same dates with the reason each was refused, for an honest message. */
+    skippedReasons?: Array<{ startsAt: string; reason: string }>;
     incomplete: boolean;
   };
 }
@@ -107,6 +120,8 @@ export interface WidgetConfigPayload {
     close_time: string | null;
     closed: boolean;
   }>;
+  /** Whether this business offers repeat bookings (re-checked server-side). */
+  recurring_enabled?: boolean;
   services: Array<{
     id: string;
     name: string;
@@ -115,6 +130,17 @@ export interface WidgetConfigPayload {
     duration_minutes: number;
     price_cents: number;
     deposit_cents: number;
+    /** flat | hourly | square_foot | custom. */
+    pricing_unit?: string;
+    /** e.g. "sq ft", shown next to a per-unit price. */
+    pricing_unit_label?: string | null;
+    minimum_hours?: number | null;
+    /**
+     * True when the price depends on a measurement nobody has yet, so the
+     * service cannot be given an honest instant total and goes down the
+     * enquiry path instead (B06).
+     */
+    quote_on_request?: boolean;
     addons: Array<{
       id: string;
       name: string;

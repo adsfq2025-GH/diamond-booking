@@ -49,7 +49,13 @@ export type SubscriptionStatus =
 
 export type RequestStatus = "pending" | "approved" | "denied";
 
-export type ReminderStatus = "pending" | "sent" | "failed" | "cancelled";
+export type ReminderStatus =
+  | "pending"
+  /** Claimed by a worker; set atomically so two runs cannot both send it. */
+  | "processing"
+  | "sent"
+  | "failed"
+  | "cancelled";
 
 export interface Database {
   public: {
@@ -467,6 +473,12 @@ export interface Database {
           coupon_id: string | null;
           discount_cents: number;
           cancellation_reason: string | null;
+          /** When this appointment was last moved, and how often (B01). */
+          rescheduled_at: string | null;
+          reschedule_count: number;
+          /** Pricing snapshot: what the total was calculated on (B06). */
+          pricing_unit: string | null;
+          pricing_quantity: number | null;
           recurrence_group_id: string | null;
           recurrence_rule: string | null;
           recurrence_until: string | null;
@@ -855,6 +867,11 @@ export interface Database {
           status: ReminderStatus;
           external_id: string | null;
           error: string | null;
+          /** Delivery attempts so far, counted when the row is claimed (D01). */
+          attempts: number;
+          claimed_at: string | null;
+          /** Earliest retry after a failure (exponential backoff). */
+          next_attempt_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1190,6 +1207,8 @@ export interface Database {
           p_service_id: string;
           p_addon_ids?: string[];
           p_coupon_code?: string | null;
+          /** Hours / square feet / custom units for a per-unit service (B06). */
+          p_quantity?: number | null;
         };
         Returns: {
           subtotal_cents: number;
@@ -1197,6 +1216,9 @@ export interface Database {
           total_cents: number;
           deposit_cents: number;
           duration_minutes: number;
+          pricing_unit: string;
+          pricing_quantity: number;
+          pricing_unit_label: string | null;
           coupon: { ok: boolean; error?: string; code?: string; discount_cents?: number };
         };
       };
@@ -1244,8 +1266,92 @@ export interface Database {
           p_address?: Json | null;
           p_notes?: string | null;
           p_addon_ids?: string[];
+          /** Hours / square feet / custom units for a per-unit service (B06). */
+          p_quantity?: number | null;
+          /**
+           * The recurrence the customer asked for. Passed so the function can
+           * refuse a series at a business with repeat bookings switched off —
+           * that was a browser-side check only (B04).
+           */
+          p_recurrence?: string | null;
         };
         Returns: Json;
+      };
+
+      // ---- 0013_launch_gates.sql ----
+      /** Move one appointment, revalidating every scheduling rule (B01, B02). */
+      reschedule_booking: {
+        Args: { p_booking_id: string; p_starts_at: string };
+        Returns: {
+          booking_id: string;
+          starts_at: string;
+          ends_at: string;
+          status: BookingStatus;
+        };
+      };
+      /**
+       * Add one validated visit to a recurring series (B04). Returns a result
+       * rather than raising for an unusable date, so the caller can carry on
+       * with the series and report which dates were skipped.
+       */
+      create_series_occurrence: {
+        Args: { p_source_booking_id: string; p_starts_at: string };
+        Returns: {
+          ok: boolean;
+          booking_id?: string;
+          starts_at?: string;
+          ends_at?: string;
+          status?: BookingStatus;
+          reason?: string;
+        };
+      };
+      /** Claim the reminders that are due, atomically (D01). */
+      claim_due_reminders: {
+        Args: { p_limit?: number; p_stale_after?: string };
+        Returns: {
+          id: string;
+          tenant_id: string;
+          booking_id: string;
+          customer_id: string | null;
+          channel: string;
+          scheduled_for: string;
+          status: ReminderStatus;
+          attempts: number;
+        }[];
+      };
+      /** Record one reminder's outcome, with retry backoff (D01). */
+      complete_reminder: {
+        Args: {
+          p_reminder_id: string;
+          p_ok: boolean;
+          p_external_id?: string | null;
+          p_error?: string | null;
+          p_max_attempts?: number;
+        };
+        Returns: {
+          id: string;
+          status: ReminderStatus;
+          attempts: number;
+          next_attempt_at: string | null;
+        };
+      };
+      /** Retire reminders for cancelled or already-past appointments (D01). */
+      retire_stale_reminders: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      /**
+       * Adopt the guest customer rows that match the signed-in address, so a
+       * guest who later gets an account can see their own history.
+       */
+      link_guest_customer_records: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      /** Shared, cross-instance throttle for the public surfaces. */
+      consume_rate_limit: {
+        Args: { p_key: string; p_limit: number; p_window_seconds: number };
+        Returns: { allowed: boolean; count: number; retry_after: number };
       };
     };
     Enums: {

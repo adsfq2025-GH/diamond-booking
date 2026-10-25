@@ -83,7 +83,9 @@ export function CalendarClient({
           ...e,
           startsAt: nextStart,
           endsAt: new Date(newStart.getTime() + dur).toISOString(),
-          status: e.status === "pending" ? "pending" : "rescheduled",
+          // The status does not change when an appointment moves (B01): it
+          // stays an active commitment, so the optimistic row keeps its own.
+          status: e.status,
         };
       }),
     );
@@ -93,7 +95,7 @@ export function CalendarClient({
             ...prev,
             startsAt: nextStart,
             endsAt: new Date(newStart.getTime() + (new Date(previousEnd).getTime() - new Date(previousStart).getTime())).toISOString(),
-            status: prev.status === "pending" ? "pending" : "rescheduled",
+            status: prev.status,
           }
         : prev,
     );

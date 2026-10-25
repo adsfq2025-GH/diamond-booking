@@ -11,7 +11,13 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { sendBookingConfirmationForKey } from "@/lib/integrations/email";
 import { createCalendarEventForBooking } from "@/lib/integrations/calendar-sync";
 import { createDepositIntent } from "@/lib/integrations/stripe";
-import { computeOccurrences, type RecurrenceRule } from "@/lib/recurrence";
+import {
+  computeOccurrences,
+  DEFAULT_MAX_OCCURRENCES,
+  type RecurrenceRule,
+} from "@/lib/recurrence";
+import { materializeSeries } from "@/lib/recurrence-series";
+import { bookingErrorMessage } from "@/lib/booking-errors";
 import { smsRemindersAllowed } from "@/lib/entitlements";
 import type { PlanTier } from "@/types/database";
 import type {
@@ -201,34 +207,6 @@ function mockSlots(serviceId: string, date: string, addonIds: string[] = []): Av
  * be shown verbatim. Unknown codes fall back to a neutral message rather than
  * leaking internals.
  */
-function bookingErrorMessage(raw?: string): string {
-  const code = (raw ?? "").toLowerCase();
-  if (code.includes("slot_taken")) {
-    return "That time was just booked by someone else. Please pick another time.";
-  }
-  if (code.includes("no_qualified_staff")) {
-    return "Nobody is scheduled to provide that service at that time. Please pick another time.";
-  }
-  if (code.includes("outside_business_hours")) {
-    return "That appointment would run past closing time. Please pick an earlier start.";
-  }
-  if (code.includes("crosses_midnight")) {
-    return "That appointment is too long to fit in one day. Please contact the business directly.";
-  }
-  if (code.includes("slot_in_past")) {
-    return "That time has already passed. Please pick another time.";
-  }
-  if (code.includes("service_not_found")) {
-    return "That service is no longer available.";
-  }
-  if (code.includes("widget_not_found")) {
-    return "This booking page is not currently accepting appointments.";
-  }
-  if (code.includes("email_required")) return "Please enter your email address.";
-  if (code.includes("name_required")) return "Please enter your name.";
-  return "Could not create the booking. Please try again.";
-}
-
 /**
  * Price a service + add-ons + an optional coupon before booking (A16).
  * The quote and the booking share price_coupon()/booking_duration_minutes()
@@ -239,12 +217,19 @@ export async function quoteBooking(input: {
   serviceId: string;
   addonIds?: string[];
   couponCode?: string | null;
+  /** Hours / square feet / custom units, for a service priced per unit (B06). */
+  quantity?: number | null;
 }): Promise<{
   subtotalCents: number;
   discountCents: number;
   totalCents: number;
   depositCents: number;
   durationMinutes: number;
+  /** flat | hourly | square_foot | custom — what the total was calculated on. */
+  pricingUnit: string;
+  /** The units actually charged for: an hourly service bills its minimum. */
+  pricingQuantity: number;
+  pricingUnitLabel: string | null;
   couponError: string | null;
 } | null> {
   if (!supabaseEnvConfigured()) return null;
@@ -254,6 +239,7 @@ export async function quoteBooking(input: {
     p_service_id: input.serviceId,
     p_addon_ids: input.addonIds ?? [],
     p_coupon_code: input.couponCode ?? null,
+    p_quantity: input.quantity ?? null,
   });
   if (error || !data) return null;
 
@@ -263,6 +249,9 @@ export async function quoteBooking(input: {
     total_cents: number;
     deposit_cents: number;
     duration_minutes: number;
+    pricing_unit?: string;
+    pricing_quantity?: number | string;
+    pricing_unit_label?: string | null;
     coupon: { ok: boolean; error?: string; min_subtotal_cents?: number };
   };
   return {
@@ -271,6 +260,9 @@ export async function quoteBooking(input: {
     totalCents: q.total_cents,
     depositCents: q.deposit_cents,
     durationMinutes: q.duration_minutes,
+    pricingUnit: q.pricing_unit ?? "flat",
+    pricingQuantity: Number(q.pricing_quantity ?? 1),
+    pricingUnitLabel: q.pricing_unit_label ?? null,
     couponError:
       input.couponCode && !q.coupon?.ok
         ? couponErrorMessage(q.coupon?.error, q.coupon?.min_subtotal_cents)
@@ -408,6 +400,8 @@ export interface CreateBookingInput {
   address?: Record<string, unknown> | null;
   notes?: string | null;
   addonIds?: string[];
+  /** Hours / square feet / custom units, for a service priced per unit (B06). */
+  quantity?: number | null;
   /** Recurrence for the series ("none" = one-time). */
   recurrence?: RecurrenceRule;
   /** ISO date string; null/undefined = open-ended (rolling window). */
@@ -441,28 +435,42 @@ export async function getWidgetRecurringEnabled(publicKey: string): Promise<bool
 export interface RecurrenceOutcome {
   /** Occurrences successfully reserved, not counting the first booking. */
   reserved: number;
-  /** ISO dates that could not be reserved because the time was taken. */
+  /** ISO dates that could not be reserved. */
   skipped: string[];
+  /** The same dates with the reason each one was refused. */
+  skippedReasons?: Array<{ startsAt: string; reason: string }>;
   /** True when the run stopped early on an unexpected error. */
   incomplete: boolean;
 }
 
 /**
- * Reserve every future occurrence of a recurring booking as its own bookings
- * row (service role). Rows share recurrence_group_id.
+ * Reserve every future occurrence of a recurring booking.
  *
- * Occurrences that clash with an existing booking are skipped rather than
- * fatal — but they are REPORTED. Previously they were dropped silently and the
- * customer was told their standing appointment was booked, with no way to learn
- * which dates were missing (A28).
+ * Each visit now goes through create_series_occurrence() (B04). The previous
+ * version inserted copied booking rows with the service role, which meant
+ * every visit after the first skipped the business-hours, staff-eligibility,
+ * approved-time-off and buffer checks the first one passed, carried none of
+ * its add-on links, queued no reminders and dispatched no calendar event. A
+ * standing appointment could therefore sit on a day the business is closed,
+ * with half its job details missing and nobody reminded about it.
+ *
+ * Occurrences that cannot be reserved are still skipped rather than fatal —
+ * and still REPORTED, now with the reason, so the customer learns which dates
+ * are missing instead of being told their series was booked.
  */
-async function materializeRecurrence(
-  firstBookingId: string,
-  rule: RecurrenceRule,
-  recurrenceUntil: string | null,
-): Promise<RecurrenceOutcome> {
+async function materializeRecurrence(input: {
+  firstBookingId: string;
+  rule: RecurrenceRule;
+  recurrenceUntil: string | null;
+  /** The business's IANA timezone, so a weekly 09:00 stays 09:00 (B05). */
+  timezone: string;
+  tenantId: string;
+  customerId: string | null;
+  notifications: Record<string, unknown>;
+  plan: PlanTier;
+}): Promise<RecurrenceOutcome> {
   const outcome: RecurrenceOutcome = { reserved: 0, skipped: [], incomplete: false };
-  if (!rule || rule === "none") return outcome;
+  if (!input.rule || input.rule === "none") return outcome;
   let admin: ReturnType<typeof createAdminClient>;
   try {
     admin = createAdminClient();
@@ -474,8 +482,8 @@ async function materializeRecurrence(
 
   const { data: first } = await admin
     .from("bookings")
-    .select("*")
-    .eq("id", firstBookingId)
+    .select("id, starts_at, status")
+    .eq("id", input.firstBookingId)
     .maybeSingle();
   if (!first) {
     outcome.incomplete = true;
@@ -483,46 +491,61 @@ async function materializeRecurrence(
   }
 
   const groupId = crypto.randomUUID();
-  const until = recurrenceUntil ? new Date(recurrenceUntil) : null;
+  const until = input.recurrenceUntil ? new Date(input.recurrenceUntil) : null;
 
-  // Tag the original as the series anchor.
-  await admin
+  // Tag the original as the series anchor. create_series_occurrence copies the
+  // group id and rule from it, so this has to land first.
+  const { error: anchorError } = await admin
     .from("bookings")
-    .update({ recurrence_group_id: groupId, recurrence_rule: rule, recurrence_until: recurrenceUntil ?? null })
-    .eq("id", firstBookingId);
-
-  const durationMs = new Date(first.ends_at).getTime() - new Date(first.starts_at).getTime();
-  const occurrences = computeOccurrences(new Date(first.starts_at), rule, until);
-
-  for (const start of occurrences) {
-    const ends = new Date(start.getTime() + durationMs);
-    const { error } = await admin.from("bookings").insert({
-      tenant_id: first.tenant_id,
-      customer_id: first.customer_id,
-      service_id: first.service_id,
-      employee_id: first.employee_id,
-      status: first.status,
-      starts_at: start.toISOString(),
-      ends_at: ends.toISOString(),
-      price_cents: first.price_cents,
-      deposit_cents: first.deposit_cents,
-      address: first.address,
-      customer_notes: first.customer_notes,
-      source: first.source,
+    .update({
       recurrence_group_id: groupId,
-      recurrence_rule: rule,
-      recurrence_until: recurrenceUntil ?? null,
+      recurrence_rule: input.rule,
+      recurrence_until: input.recurrenceUntil ?? null,
+    })
+    .eq("id", input.firstBookingId);
+  if (anchorError) {
+    console.error("[recurrence] could not anchor the series", anchorError);
+    outcome.incomplete = true;
+    return outcome;
+  }
+
+  const occurrences = computeOccurrences(
+    new Date(first.starts_at),
+    input.rule,
+    until,
+    DEFAULT_MAX_OCCURRENCES,
+    input.timezone || "UTC",
+  );
+
+  const result = await materializeSeries(admin, input.firstBookingId, occurrences);
+  outcome.reserved = result.reserved.length;
+  outcome.skipped = result.skipped.map((s) => s.startsAt);
+  outcome.skippedReasons = result.skipped;
+  outcome.incomplete = result.incomplete;
+
+  // Every reserved visit gets the same follow-up the first one gets: a queued
+  // reminder and, once confirmed, a calendar event. Neither happened before.
+  for (const bookingId of result.reserved) {
+    const { data: row } = await admin
+      .from("bookings")
+      .select("starts_at, status")
+      .eq("id", bookingId)
+      .maybeSingle();
+    if (!row) continue;
+
+    await scheduleBookingReminders({
+      bookingId,
+      tenantId: input.tenantId,
+      customerId: input.customerId,
+      startsAt: row.starts_at,
+      notifications: input.notifications,
+      plan: input.plan,
+    }).catch((err) => {
+      console.error("[recurrence] could not queue reminders for an occurrence", err);
     });
-    if (!error) {
-      outcome.reserved += 1;
-    } else if (/exclu|overlap|conflict|23P01/i.test(error.message)) {
-      // That time is already taken; the rest of the series still stands.
-      outcome.skipped.push(start.toISOString());
-    } else {
-      // Something unexpected: stop, and say the series is incomplete.
-      console.error("[recurrence] stopped early", error);
-      outcome.incomplete = true;
-      break;
+
+    if (row.status === "confirmed") {
+      await createCalendarEventForBooking(bookingId).catch(() => {});
     }
   }
 
@@ -610,9 +633,11 @@ export async function createWidgetBooking(
     p_address: (input.address as never) ?? null,
     p_notes: input.notes ?? null,
     p_addon_ids: input.addonIds ?? [],
+    p_quantity: input.quantity ?? null,
+    p_recurrence: input.recurrence ?? "none",
   });
   if (error || !data) {
-    return { ok: false, error: bookingErrorMessage(error?.message) };
+    return { ok: false, error: bookingErrorMessage(error?.message, "customer") };
   }
   const result = data as unknown as WidgetBookingResult;
 
@@ -642,23 +667,63 @@ export async function createWidgetBooking(
     .eq("id", result.booking_id)
     .maybeSingle();
 
+  // One tenant read, used by the recurrence, the reminders and the deposit
+  // gate below. The recurrence used to run before this, with no access to the
+  // notification settings, which is why repeat visits got no reminders.
+  const { data: tenantRow } = bookingRow?.tenant_id
+    ? await admin
+        .from("tenants")
+        .select("settings, stripe_charges_enabled, plan, timezone")
+        .eq("id", bookingRow.tenant_id)
+        .maybeSingle()
+    : { data: null };
+  const tenantSettings = (tenantRow?.settings ?? {}) as Record<string, unknown>;
+  const notifications =
+    (tenantSettings.notifications as Record<string, unknown> | undefined) ?? {};
+  const plan = (tenantRow?.plan ?? "starter") as PlanTier;
+
+  if (bookingRow?.tenant_id) {
+    await scheduleBookingReminders({
+      bookingId: result.booking_id,
+      tenantId: bookingRow.tenant_id,
+      customerId: bookingRow.customer_id,
+      startsAt: result.starts_at,
+      notifications,
+      plan,
+    }).catch((err) => {
+      console.error("[booking] could not queue reminders", err);
+    });
+
+    if (result.status === "confirmed") {
+      await createCalendarEventForBooking(result.booking_id).catch(() => {});
+    }
+  }
+
   // Reserve future occurrences on the calendar (blocks availability).
-  if (input.recurrence && input.recurrence !== "none") {
-    const outcome = await materializeRecurrence(
-      result.booking_id,
-      input.recurrence,
-      input.recurrenceUntil ?? null,
-    ).catch((): RecurrenceOutcome => ({ reserved: 0, skipped: [], incomplete: true }));
+  if (input.recurrence && input.recurrence !== "none" && bookingRow?.tenant_id) {
+    const outcome = await materializeRecurrence({
+      firstBookingId: result.booking_id,
+      rule: input.recurrence,
+      recurrenceUntil: input.recurrenceUntil ?? null,
+      timezone: tenantRow?.timezone ?? cfg?.tenant.timezone ?? "UTC",
+      tenantId: bookingRow.tenant_id,
+      customerId: bookingRow.customer_id,
+      notifications,
+      plan,
+    }).catch((): RecurrenceOutcome => ({ reserved: 0, skipped: [], incomplete: true }));
     result.recurrence = outcome;
   }
 
-  // Fire-and-forget confirmation email (tenant SMTP → platform Resend → no-op).
+  // The confirmation email is AWAITED and its outcome recorded (D01). It used
+  // to be a bare `void ...catch(() => {})`, and the confirmation screen then
+  // decided it had been "sent" from whether a sender was configured — so a
+  // rejected or bounced send still told the customer to check their inbox.
   if (cfg && svc) {
     const start = new Date(result.starts_at);
     // Render the time in the BUSINESS's timezone so the email matches what the
     // customer picked and what the dashboard shows (not the server's UTC).
-    const tz = cfg.tenant.timezone || undefined;
-    void sendBookingConfirmationForKey(input.publicKey, {
+    const tz = tenantRow?.timezone || cfg.tenant.timezone || undefined;
+    const sent = await sendBookingConfirmationForKey(input.publicKey, {
       businessName: cfg.tenant.name,
       customerName: input.customerName,
       customerEmail: input.customerEmail,
@@ -666,29 +731,17 @@ export async function createWidgetBooking(
       whenText: `${start.toLocaleDateString("en-US", { timeZone: tz, weekday: "long", month: "long", day: "numeric" })} at ${start.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })}`,
       priceText: `$${(result.price_cents / 100).toFixed(2)}`,
       addressText: (input.address as { line1?: string } | null)?.line1 ?? undefined,
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error("[booking] confirmation email threw", err);
+      return { ok: false as const, error: "Delivery failed." };
+    });
+    result.confirmation_sent = sent.ok;
+    if (!sent.ok) {
+      console.error("[booking] confirmation email not delivered", sent.error);
+    }
   }
 
   if (bookingRow?.tenant_id) {
-    const { data: tenantRow } = await admin
-      .from("tenants")
-      .select("settings, stripe_charges_enabled, plan")
-      .eq("id", bookingRow.tenant_id)
-      .maybeSingle();
-    const tenantSettings = ((tenantRow?.settings ?? {}) as Record<string, unknown>);
-    await scheduleBookingReminders({
-      bookingId: result.booking_id,
-      tenantId: bookingRow.tenant_id,
-      customerId: bookingRow.customer_id,
-      startsAt: result.starts_at,
-      notifications: (tenantSettings.notifications as Record<string, unknown> | undefined) ?? {},
-      plan: (tenantRow?.plan ?? "starter") as PlanTier,
-    }).catch(() => {});
-
-    if (result.status === "confirmed") {
-      await createCalendarEventForBooking(result.booking_id).catch(() => {});
-    }
-
     // Deposits (A12). Online capture is NOT implemented: there is no Stripe.js,
     // no Elements and no confirmation step in the booking flow. Creating a
     // PaymentIntent here produced a client secret nothing could ever confirm —

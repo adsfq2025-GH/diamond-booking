@@ -22,6 +22,8 @@ import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { supabaseEnvConfigured } from "@/lib/env";
 import { canAddEmployee, tenantPlanContext } from "@/lib/entitlements";
 import { sendTeamInvitation } from "@/lib/integrations/email";
+import { MIN_PASSWORD_SCORE, passwordScore } from "@/lib/password";
+import type { UserRole } from "@/types/database";
 
 export type TeamActionResult =
   | { ok: true; message: string }
@@ -249,6 +251,13 @@ export async function acceptInvitation(
         error: "This invitation was sent to a different email address. Sign in with that address instead.",
       };
     }
+    if (code.includes("invitee_owns_a_business")) {
+      return {
+        ok: false,
+        error:
+          "This account owns its own business on Diamond Booking, so it cannot also be a team member. Ask the business to invite a different email address.",
+      };
+    }
     if (code.includes("employee_already_linked")) {
       return { ok: false, error: "That teammate record is already linked to another account." };
     }
@@ -313,4 +322,143 @@ export async function invitationPreview(
       Boolean(data.revoked_at) ||
       new Date(data.expires_at).getTime() < Date.now(),
   };
+}
+
+/**
+ * Create an account for someone who has been invited to join a team (O02).
+ *
+ * The invitation page used to send a new invitee to the business signup form.
+ * That form creates a business_owner, bootstraps a whole tenant and redirects
+ * to onboarding — ignoring the invite entirely. The invitee ended up owning an
+ * unrelated business, and because accept_employee_invitation deliberately
+ * refuses to demote a business_owner, their invitation could then never be
+ * accepted at all.
+ *
+ * This is the staff path: the account is created with the invited email and
+ * the employee role from the start, bound to the inviting business, and the
+ * invitation is consumed in the same call. Nothing here trusts the browser —
+ * the email comes from the invitation row, not from the form.
+ */
+export async function registerFromInvitation(input: {
+  token: string;
+  fullName: string;
+  password: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!supabaseEnvConfigured()) {
+    return { ok: false, error: "Invitations are unavailable right now." };
+  }
+
+  const fullName = input.fullName.trim();
+  if (!fullName) return { ok: false, error: "Please enter your name." };
+  if (passwordScore(input.password) < MIN_PASSWORD_SCORE) {
+    return {
+      ok: false,
+      error: "That password is too weak — use at least 8 characters, ideally with a number.",
+    };
+  }
+
+  let admin: ReturnType<typeof createAdminClient>;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return { ok: false, error: "Invitations are unavailable right now." };
+  }
+
+  // Re-validate the invitation server-side; the page's preview is only copy.
+  const { data: invitation } = await admin
+    .from("employee_invitations")
+    .select("id, tenant_id, employee_id, email, expires_at, accepted_at, revoked_at")
+    .eq("token", input.token)
+    .maybeSingle();
+
+  if (!invitation) return { ok: false, error: "That invitation link is not valid." };
+  if (invitation.revoked_at) {
+    return { ok: false, error: "That invitation was withdrawn. Ask the business to send a new one." };
+  }
+  if (invitation.accepted_at) {
+    return { ok: false, error: "That invitation has already been used." };
+  }
+  if (new Date(invitation.expires_at).getTime() < Date.now()) {
+    return { ok: false, error: "That invitation has expired. Ask the business to send a new one." };
+  }
+
+  const { data: employee } = await admin
+    .from("employees")
+    .select("id, profile_id")
+    .eq("id", invitation.employee_id)
+    .maybeSingle();
+  if (employee?.profile_id) {
+    return { ok: false, error: "That teammate record is already linked to another account." };
+  }
+
+  const email = invitation.email.trim().toLowerCase();
+
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password: input.password,
+    email_confirm: true,
+    app_metadata: { role: "employee" satisfies UserRole },
+    user_metadata: { full_name: fullName },
+  });
+
+  if (createError || !created?.user) {
+    if (createError?.code === "email_exists" || /already.*regist/i.test(createError?.message ?? "")) {
+      return {
+        ok: false,
+        error: "That email already has an account — sign in instead, then accept the invitation.",
+      };
+    }
+    return { ok: false, error: "We couldn't create your account. Please try again." };
+  }
+  const userId = created.user.id;
+
+  // Profile, employee link and invitation consumption. Any failure removes the
+  // auth user again so the invited address is not burned by a half-made
+  // account that can never be completed.
+  try {
+    const { error: profileError } = await admin.from("profiles").insert({
+      id: userId,
+      tenant_id: invitation.tenant_id,
+      role: "employee",
+      full_name: fullName,
+      email,
+    });
+    if (profileError) throw profileError;
+
+    const { error: linkError } = await admin
+      .from("employees")
+      .update({ profile_id: userId, invite_email: null, active: true })
+      .eq("id", invitation.employee_id)
+      .is("profile_id", null);
+    if (linkError) throw linkError;
+
+    // Single use, enforced by the write itself rather than by a prior read.
+    const { data: consumed, error: consumeError } = await admin
+      .from("employee_invitations")
+      .update({ accepted_at: new Date().toISOString() })
+      .eq("id", invitation.id)
+      .is("accepted_at", null)
+      .is("revoked_at", null)
+      .select("id");
+    if (consumeError) throw consumeError;
+    if (!consumed || consumed.length === 0) {
+      throw new Error("invitation_already_used");
+    }
+  } catch (err) {
+    console.error("registerFromInvitation: setup failed, rolling back", err);
+    await admin.auth.admin.deleteUser(userId).catch(() => undefined);
+    return { ok: false, error: "We couldn't finish setting up your account. Please try again." };
+  }
+
+  // Sign them in on this browser so they land on their own schedule.
+  const supabase = await createClient();
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password: input.password,
+  });
+  if (signInError) {
+    return { ok: false, error: "Your account is ready — please sign in to continue." };
+  }
+
+  return { ok: true };
 }

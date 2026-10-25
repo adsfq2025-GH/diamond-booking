@@ -14,6 +14,8 @@ import {
   DEFAULT_MAX_OCCURRENCES,
   type RecurrenceRule,
 } from "@/lib/recurrence";
+import { bookingErrorMessage } from "@/lib/booking-errors";
+import { materializeSeries } from "@/lib/recurrence-series";
 import type { BookingStatus } from "@/types/database";
 
 async function scope() {
@@ -87,7 +89,7 @@ export async function setBookingStatus(
       .update({ status: "cancelled", updated_at: new Date().toISOString() })
       .eq("booking_id", id)
       .eq("tenant_id", s.tenantId)
-      .eq("status", "pending");
+      .in("status", ["pending", "processing"]);
     await removeCalendarEventForBooking(id).catch(() => {});
   }
   if (status === "confirmed") {
@@ -98,6 +100,27 @@ export async function setBookingStatus(
   return { ok: true };
 }
 
+/**
+ * Move one appointment to a new time.
+ *
+ * The whole move now happens inside reschedule_booking() (0013), for two
+ * reasons the audit found:
+ *
+ *  - B01. This action used to set the status to `rescheduled`, and the
+ *    deployed conflict function, the exclusion constraint and the calendar
+ *    query all counted only pending/confirmed. A moved appointment therefore
+ *    stopped holding its new time AND vanished from the calendar on refresh,
+ *    so the slot could be sold twice. The status is no longer changed at all;
+ *    the move is recorded in rescheduled_at / reschedule_count.
+ *
+ *  - B02/B03. The old pre-check looked at booking conflicts only — not
+ *    business hours, the employee's own working hours, approved time off,
+ *    service eligibility or a future date — so the calendar could accept a
+ *    time the public booking flow would have refused. And because the check
+ *    and the write were two statements, two moves could pass it concurrently.
+ *    The RPC validates against the same rules public booking uses, holding the
+ *    per-employee capacity lock across the check and the write.
+ */
 export async function rescheduleBooking(
   id: string,
   startsAt: string,
@@ -106,78 +129,34 @@ export async function rescheduleBooking(
   const s = await scope();
   if (!s) return { ok: false, error: "No business found." };
 
-  const { data: booking, error: bookingError } = await s.supabase
-    .from("bookings")
-    .select("id, tenant_id, starts_at, ends_at, status, employee_id, services(buffer_before_minutes, buffer_after_minutes)")
-    .eq("id", id)
-    .eq("tenant_id", s.tenantId)
-    .maybeSingle();
-
-  if (bookingError) return { ok: false, error: bookingError.message };
-  if (!booking) return { ok: false, error: "Booking not found." };
-
   const parsedStart = new Date(startsAt);
   if (Number.isNaN(parsedStart.getTime())) {
     return { ok: false, error: "Invalid start time." };
   }
 
-  const durationMs = new Date(booking.ends_at).getTime() - new Date(booking.starts_at).getTime();
-  const nextEnd = new Date(parsedStart.getTime() + durationMs).toISOString();
-
-  // Pre-check the move. Without this the only guard was the no_double_booking
-  // exclusion constraint, which surfaced to the owner as a raw Postgres
-  // exclusion-violation dump — and which ignores buffers entirely, so a move
-  // that violated the service's own buffers was accepted silently (A38).
-  if (booking.employee_id) {
-    const svc = Array.isArray(booking.services) ? booking.services[0] : booking.services;
-    const { data: clash, error: clashError } = await s.supabase.rpc("booking_conflicts", {
-      p_employee_id: booking.employee_id,
-      p_start: parsedStart.toISOString(),
-      p_end: nextEnd,
-      p_buffer_before_minutes: svc?.buffer_before_minutes ?? 0,
-      p_buffer_after_minutes: svc?.buffer_after_minutes ?? 0,
-      p_ignore_booking_id: id,
-    });
-    if (clashError) return { ok: false, error: clashError.message };
-    if (clash) {
-      return {
-        ok: false,
-        error:
-          "That time clashes with another booking for this team member (including its buffers). Pick a different time.",
-      };
-    }
-  }
-
-  const { error } = await s.supabase
-    .from("bookings")
-    .update({
-      starts_at: startsAt,
-      ends_at: nextEnd,
-      status: booking.status === "pending" ? "pending" : "rescheduled",
-    })
-    .eq("id", id)
-    .eq("tenant_id", s.tenantId);
+  const { data, error } = await s.supabase.rpc("reschedule_booking", {
+    p_booking_id: id,
+    p_starts_at: parsedStart.toISOString(),
+  });
 
   if (error) {
-    // Last-resort guard: a concurrent booking won the race between the
-    // pre-check and the write.
-    const message = /exclu|overlap|23P01/i.test(error.message)
-      ? "That time was just taken by another booking. Pick a different time."
-      : error.message;
-    return { ok: false, error: message };
+    return { ok: false, error: bookingErrorMessage(error.message, "owner") };
   }
+
+  const moved = data as unknown as { starts_at: string; ends_at: string } | null;
+  if (!moved) return { ok: false, error: "Could not move that appointment." };
 
   await rescheduleBookingReminders({
     supabase: s.supabase,
     tenantId: s.tenantId,
     bookingId: id,
-    startsAt,
+    startsAt: moved.starts_at,
   }).catch(() => {});
   await resyncCalendarEventForBooking(id).catch(() => {});
 
   revalidatePath("/dashboard/bookings");
   revalidatePath("/dashboard/calendar");
-  return { ok: true, startsAt, endsAt: nextEnd };
+  return { ok: true, startsAt: moved.starts_at, endsAt: moved.ends_at };
 }
 
 /**
@@ -202,12 +181,15 @@ export async function cancelSeries(
   if (error) return { ok: false, error: error.message };
   const ids = (data ?? []).map((row) => row.id);
   if (ids.length > 0) {
-    await s.supabase
+    const { error: reminderError } = await s.supabase
       .from("booking_reminders")
       .update({ status: "cancelled", updated_at: new Date().toISOString() })
       .eq("tenant_id", s.tenantId)
       .in("booking_id", ids)
-      .eq("status", "pending");
+      .in("status", ["pending", "processing"]);
+    if (reminderError) {
+      console.error("cancelSeries: reminder cleanup failed", reminderError);
+    }
     await Promise.all(ids.map((id) => removeCalendarEventForBooking(id).catch(() => {})));
   }
   revalidatePath("/dashboard/bookings");
@@ -223,7 +205,7 @@ export async function cancelSeries(
  */
 export async function cancelMyBooking(
   bookingId: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; cancelledCount?: number }> {
   if (!supabaseEnvConfigured()) return { ok: true };
   const profile = await requireRole("customer");
   const supabase = await createClient();
@@ -274,28 +256,59 @@ export async function cancelMyBooking(
     }
   }
 
-  if (bk.recurrence_group_id) {
-    await admin
-      .from("bookings")
-      .update({ status: "cancelled" satisfies BookingStatus })
-      .eq("recurrence_group_id", bk.recurrence_group_id)
-      .in("customer_id", custIds)
-      .gte("starts_at", new Date().toISOString())
-      .in("status", ["pending", "confirmed", "rescheduled"]);
-  } else {
-    await admin
-      .from("bookings")
-      .update({ status: "cancelled" satisfies BookingStatus })
-      .eq("id", bookingId);
+  // Which bookings are actually being cancelled? The whole future series for a
+  // standing appointment, otherwise just this one. Capturing the ids is what
+  // lets the cleanup below cover EVERY affected visit: it used to clear the
+  // reminder and calendar event of the clicked booking alone, so the rest of a
+  // cancelled series kept reminding the customer about visits that no longer
+  // existed, and kept their entries in the owner's Google Calendar (D02).
+  const cancelQuery = bk.recurrence_group_id
+    ? admin
+        .from("bookings")
+        .update({ status: "cancelled" satisfies BookingStatus })
+        .eq("recurrence_group_id", bk.recurrence_group_id)
+        .in("customer_id", custIds)
+        .gte("starts_at", new Date().toISOString())
+        .in("status", ["pending", "confirmed", "rescheduled"])
+    : admin
+        .from("bookings")
+        .update({ status: "cancelled" satisfies BookingStatus })
+        .eq("id", bookingId)
+        .in("status", ["pending", "confirmed", "rescheduled"]);
+
+  // The return value was discarded, so a refused or failed write reported
+  // success to the portal, which had already removed the row from the list.
+  const { data: cancelled, error: cancelError } = await cancelQuery.select("id");
+  if (cancelError) {
+    console.error("cancelMyBooking: cancellation write failed", cancelError);
+    return {
+      ok: false,
+      error: "We could not cancel that appointment. Please contact the business directly.",
+    };
   }
-  await admin
+  const cancelledIds = (cancelled ?? []).map((row) => row.id);
+  if (cancelledIds.length === 0) {
+    return {
+      ok: false,
+      error: "That appointment is no longer active, so there was nothing to cancel.",
+    };
+  }
+
+  const { error: reminderError } = await admin
     .from("booking_reminders")
     .update({ status: "cancelled", updated_at: new Date().toISOString() })
-    .eq("booking_id", bookingId)
-    .eq("status", "pending");
-  await removeCalendarEventForBooking(bookingId).catch(() => {});
+    .in("booking_id", cancelledIds)
+    .in("status", ["pending", "processing"]);
+  if (reminderError) {
+    // The appointment IS cancelled; a stuck reminder is an operations problem,
+    // not a reason to tell the customer their cancellation failed.
+    console.error("cancelMyBooking: reminder cleanup failed", reminderError);
+  }
+  await Promise.all(
+    cancelledIds.map((id) => removeCalendarEventForBooking(id).catch(() => {})),
+  );
   revalidatePath("/portal");
-  return { ok: true };
+  return { ok: true, cancelledCount: cancelledIds.length };
 }
 
 /**
@@ -303,9 +316,14 @@ export async function cancelMyBooking(
  * occurrences after the last one currently on the calendar. Use when a customer
  * keeps their standing appointment beyond the initially reserved window.
  */
-export async function extendSeries(
-  groupId: string,
-): Promise<{ ok: boolean; error?: string; count?: number }> {
+export async function extendSeries(groupId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  count?: number;
+  /** Dates that could not be reserved — shown, not swallowed. */
+  skipped?: Array<{ startsAt: string; reason: string }>;
+  incomplete?: boolean;
+}> {
   if (!supabaseEnvConfigured()) return { ok: true, count: 0 };
   const s = await scope();
   if (!s) return { ok: false, error: "No business found." };
@@ -327,40 +345,35 @@ export async function extendSeries(
     return { ok: false, error: "This series has a fixed end date and can't be extended." };
   }
 
-  const durationMs = new Date(last.ends_at).getTime() - new Date(last.starts_at).getTime();
+  // The tenant's own timezone, so a weekly series keeps its local time across
+  // a daylight-saving change (B05).
+  const { data: tenantRow } = await s.supabase
+    .from("tenants")
+    .select("timezone")
+    .eq("id", s.tenantId)
+    .maybeSingle();
+
   const occurrences = computeOccurrences(
     new Date(last.starts_at),
     rule,
     null,
     DEFAULT_MAX_OCCURRENCES,
+    tenantRow?.timezone ?? "UTC",
   );
-  const status: BookingStatus = last.status === "pending" ? "pending" : "confirmed";
 
-  let count = 0;
-  for (const start of occurrences) {
-    const ends = new Date(start.getTime() + durationMs);
-    const { error } = await s.supabase.from("bookings").insert({
-      tenant_id: last.tenant_id,
-      customer_id: last.customer_id,
-      service_id: last.service_id,
-      employee_id: last.employee_id,
-      status,
-      starts_at: start.toISOString(),
-      ends_at: ends.toISOString(),
-      price_cents: last.price_cents,
-      deposit_cents: last.deposit_cents,
-      address: last.address,
-      customer_notes: last.customer_notes,
-      source: last.source,
-      recurrence_group_id: groupId,
-      recurrence_rule: rule,
-      recurrence_until: null,
-    });
-    if (!error) count += 1;
-    else if (!/exclu|overlap|conflict|23P01/i.test(error.message)) break;
-  }
+  // Every added visit goes through create_series_occurrence (B04): the copied
+  // INSERTs here ran no hours, eligibility, time-off or buffer checks and
+  // never carried the first visit's add-ons, so a later visit could land on a
+  // closed day with half its job details missing.
+  const result = await materializeSeries(s.supabase, last.id, occurrences);
 
   revalidatePath("/dashboard/bookings");
   revalidatePath("/dashboard/calendar");
-  return { ok: true, count };
+  return {
+    ok: true,
+    count: result.reserved.length,
+    skipped: result.skipped,
+    incomplete: result.incomplete,
+  };
 }
+

@@ -23,11 +23,47 @@ export function CustomerPortalClient({
 }) {
   const [tab, setTab] = useState<Tab>("upcoming");
   const [upcoming, setUpcoming] = useState(data.upcoming);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [notice, setNotice] = useState<
+    { kind: "ok" | "error"; text: string } | null
+  >(null);
   const bookUrl = `/book/${data.publicKey}`;
 
+  /**
+   * Cancel an appointment, and only SAY it is cancelled once it is (D02).
+   *
+   * This used to remove the row from the list and then call the action without
+   * looking at the result. A cancellation refused by the business's notice
+   * period therefore looked like it had worked — the appointment was still
+   * live, and the customer only found out on their next reload, or when
+   * somebody turned up.
+   */
   async function cancel(id: string) {
+    const previous = upcoming;
+    setCancelling(id);
+    setNotice(null);
+    // Optimistic, but reversible.
     setUpcoming((prev) => prev.filter((b) => b.id !== id));
-    await cancelMyBooking(id);
+
+    const result = await cancelMyBooking(id);
+    setCancelling(null);
+
+    if (!result.ok) {
+      setUpcoming(previous);
+      setNotice({
+        kind: "error",
+        text: result.error ?? "We couldn't cancel that appointment. Please contact the business.",
+      });
+      return;
+    }
+
+    setNotice({
+      kind: "ok",
+      text:
+        (result.cancelledCount ?? 1) > 1
+          ? `Cancelled — your repeat appointments (${result.cancelledCount} visits) have been removed.`
+          : "Cancelled. The business has been notified.",
+    });
   }
 
   return (
@@ -68,6 +104,20 @@ export function CustomerPortalClient({
         ))}
       </div>
 
+      {notice && (
+        <p
+          role={notice.kind === "error" ? "alert" : "status"}
+          className={cn(
+            "mb-4 rounded-[10px] border px-4 py-3 text-[0.85rem]",
+            notice.kind === "error"
+              ? "border-[#e8c0bd] bg-[#fdf6f5] text-[#a63d39]"
+              : "border-success-500/30 bg-success-50 text-success-700",
+          )}
+        >
+          {notice.text}
+        </p>
+      )}
+
       {tab === "upcoming" && (
         <Panel>
           <PanelHeader title="Upcoming appointments" />
@@ -80,7 +130,12 @@ export function CustomerPortalClient({
           ) : (
             <ul className="divide-y divide-line">
               {upcoming.map((b) => (
-                <BookingRow key={b.id} b={b} onCancel={cancel} />
+                <BookingRow
+                  key={b.id}
+                  b={b}
+                  onCancel={cancel}
+                  cancelling={cancelling === b.id}
+                />
               ))}
             </ul>
           )}
@@ -111,10 +166,15 @@ export function CustomerPortalClient({
                 <div className="flex items-center gap-3">
                   <span className="font-instrument text-[0.95rem] font-semibold text-ink">{money(iv.totalCents)}</span>
                   <InvoiceStatusBadge status={iv.status} />
+                  {/* Receipt download is not implemented yet. It used to be a
+                      live-looking button with no handler, so it simply did
+                      nothing when clicked. */}
                   <button
                     type="button"
-                    aria-label="Download receipt"
-                    className="flex h-8 w-8 items-center justify-center rounded-[8px] text-ink-faint transition-colors hover:bg-surface-alt hover:text-ink"
+                    disabled
+                    aria-label="Receipt download is not available yet"
+                    title="Receipts aren't available to download yet — ask the business for a copy."
+                    className="flex h-8 w-8 cursor-not-allowed items-center justify-center rounded-[8px] text-ink-faint/40"
                   >
                     <Icon name="download" className="h-4 w-4" />
                   </button>
@@ -138,7 +198,11 @@ export function CustomerPortalClient({
             </div>
           </Panel>
           <Panel>
-            <PanelHeader title="Saved addresses" action={<button type="button" className="text-[0.8rem] font-semibold text-blue-600">Add</button>} />
+            {/* No add-address flow exists yet; the control used to look live. */}
+            <PanelHeader
+              title="Saved addresses"
+              caption="Addresses come from your bookings. Enter a new one when you book."
+            />
             <ul className="divide-y divide-line">
               {data.addresses.map((a) => (
                 <li key={a.label} className="flex items-start gap-3 px-5 py-3.5">
@@ -168,9 +232,11 @@ export function CustomerPortalClient({
 function BookingRow({
   b,
   onCancel,
+  cancelling = false,
 }: {
   b: CustBooking;
   onCancel?: (id: string) => void;
+  cancelling?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -201,14 +267,16 @@ function BookingRow({
                 <button
                   type="button"
                   onClick={() => onCancel(b.id)}
-                  className="font-semibold text-[#a63d39] hover:underline"
+                  disabled={cancelling}
+                  className="font-semibold text-[#a63d39] hover:underline disabled:opacity-60"
                 >
-                  Yes
+                  {cancelling ? "Cancelling…" : "Yes"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirming(false)}
-                  className="hover:text-ink"
+                  disabled={cancelling}
+                  className="hover:text-ink disabled:opacity-60"
                 >
                   No
                 </button>

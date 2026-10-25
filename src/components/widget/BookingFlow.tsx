@@ -21,6 +21,67 @@ function isoDate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * How a service's price should be read (B06).
+ *
+ * The widget used to print price_cents as the total for every service,
+ * including services the owner had configured as hourly, per square foot or
+ * custom — so a $50/hour service with a two-hour minimum was advertised, and
+ * booked, at $50. Hourly services now show the minimum-charge total, and
+ * services that cannot be priced without a measurement are not offered an
+ * instant total at all: they go down the enquiry path.
+ */
+function pricingSummary(s: Service): {
+  /** The amount to display, or null when a quote is needed. */
+  totalCents: number | null;
+  /** A short clause explaining what that amount covers. */
+  note: string | null;
+} {
+  const unit = s.pricing_unit ?? "flat";
+  if (unit === "hourly") {
+    const hours = Math.max(Number(s.minimum_hours ?? 1) || 1, 1);
+    return {
+      totalCents: Math.round(s.price_cents * hours),
+      note:
+        hours > 1
+          ? `${money(s.price_cents)} per hour, ${hours}-hour minimum`
+          : `${money(s.price_cents)} per hour`,
+    };
+  }
+  if (unit === "square_foot" || unit === "custom") {
+    const label = s.pricing_unit_label?.trim() || (unit === "square_foot" ? "sq ft" : "unit");
+    return { totalCents: null, note: `${money(s.price_cents)} per ${label} — quoted on request` };
+  }
+  return { totalCents: s.price_cents, note: null };
+}
+
+/**
+ * A short, customer-facing phrase for why one visit in a series was skipped.
+ * The reason comes from assert_booking_slot's own error code, so the message
+ * matches the real cause rather than assuming a clash.
+ */
+function skippedReasonText(reason: string | undefined): string | null {
+  const code = (reason ?? "").toLowerCase();
+  if (!code) return null;
+  if (code.includes("slot_taken")) return "already taken";
+  if (code.includes("outside_business_hours")) return "closed that day";
+  if (code.includes("employee_on_leave")) return "team member away";
+  if (code.includes("outside_working_hours")) return "outside working hours";
+  if (code.includes("no_qualified_staff") || code.includes("employee_not_qualified")) {
+    return "nobody available";
+  }
+  if (code.includes("employee_not_available")) return "nobody available";
+  return null;
+}
+
+/** Services priced per measurement cannot be booked instantly, only quoted. */
+function needsQuote(s: Service | null): boolean {
+  if (!s) return false;
+  return s.quote_on_request === true ||
+    (s.pricing_unit ?? "flat") === "square_foot" ||
+    (s.pricing_unit ?? "flat") === "custom";
+}
+
 export function BookingFlow({
   publicKey,
   config,
@@ -70,7 +131,11 @@ export function BookingFlow({
       .filter((a) => addons.has(a.id))
       .reduce((s, a) => s + a.price_cents, 0);
   }, [service, addons]);
-  const priceTotal = (service?.price_cents ?? 0) + addonTotal;
+  // The base follows the same rule the server prices on (B06): an hourly
+  // service's total is its rate times its minimum hours, not one hour. It used
+  // to be price_cents flat, so a $50/hour two-hour-minimum service was shown
+  // as $50 and then booked at $100.
+  const priceTotal = (service ? pricingSummary(service).totalCents ?? 0 : 0) + addonTotal;
 
   // Coupon state. The discount is only ever what the SERVER returned — never
   // computed here — so what the customer sees matches what is charged.
@@ -179,6 +244,8 @@ export function BookingFlow({
               }
               onNext={() => setStep(1)}
               priceTotal={priceTotal}
+              publicKey={publicKey}
+              requestedDate={isoDate(date)}
             />
           )}
 
@@ -287,6 +354,8 @@ function ServiceStep({
   onToggleAddon,
   onNext,
   priceTotal,
+  publicKey,
+  requestedDate,
 }: {
   services: Service[];
   selected: Service | null;
@@ -296,7 +365,10 @@ function ServiceStep({
   onToggleAddon: (id: string) => void;
   onNext: () => void;
   priceTotal: number;
+  publicKey: string;
+  requestedDate: string;
 }) {
+  const quoteOnly = needsQuote(selected);
   return (
     <div>
       <p className="mb-3 text-[0.8rem] font-semibold text-ink">Choose a service</p>
@@ -322,17 +394,45 @@ function ServiceStep({
                 <p className="mt-1 text-[0.72rem] text-ink-faint">{formatDuration(s.duration_minutes)}</p>
               </div>
               <div className="flex-none text-right">
-                <p className="font-instrument text-[1rem] font-semibold text-ink">{money(s.price_cents)}</p>
-                {s.deposit_cents > 0 && (
-                  <p className="text-[0.68rem] text-ink-faint">{money(s.deposit_cents)} deposit</p>
-                )}
+                {(() => {
+                  const pricing = pricingSummary(s);
+                  return (
+                    <>
+                      <p className="font-instrument text-[1rem] font-semibold text-ink">
+                        {pricing.totalCents === null ? "Quote" : money(pricing.totalCents)}
+                      </p>
+                      {pricing.note && (
+                        <p className="text-[0.68rem] text-ink-faint">{pricing.note}</p>
+                      )}
+                      {s.deposit_cents > 0 && (
+                        <p className="text-[0.68rem] text-ink-faint">{money(s.deposit_cents)} deposit</p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </button>
           );
         })}
       </div>
 
-      {selected && selected.addons.length > 0 && (
+      {/* A service priced per measurement has no honest instant total, so the
+          flow stops here and asks for a quote instead of quoting one unit as
+          the whole job (B06). */}
+      {selected && quoteOnly && (
+        <div className="mt-5">
+          <NoSlotsCapture
+            publicKey={publicKey}
+            serviceId={selected.id}
+            accent={accent}
+            requestedDate={requestedDate}
+            reason="quote_only"
+            unitNote={pricingSummary(selected).note}
+          />
+        </div>
+      )}
+
+      {selected && !quoteOnly && selected.addons.length > 0 && (
         <div className="mt-5">
           <p className="mb-2 text-[0.8rem] font-semibold text-ink">Add-ons</p>
           <div className="space-y-2">
@@ -368,7 +468,7 @@ function ServiceStep({
         </div>
       )}
 
-      {selected && (
+      {selected && !quoteOnly && (
         <div className="mt-5 flex items-center justify-between rounded-[12px] border border-line bg-surface-alt/60 px-4 py-3">
           <div>
             <p className="text-[0.7rem] font-semibold tracking-wide text-ink-faint uppercase">Total</p>
@@ -386,7 +486,7 @@ function ServiceStep({
         </div>
       )}
 
-      {selected && (
+      {selected && !quoteOnly && (
         <div className="mt-3 rounded-[12px] border border-line bg-card px-4 py-3 text-[0.76rem] leading-[1.6] text-ink-muted">
           {selected.deposit_cents > 0
             ? `This service has a ${money(selected.deposit_cents)} deposit. Nothing is charged here — the business will arrange it with you after booking.`
@@ -394,9 +494,11 @@ function ServiceStep({
         </div>
       )}
 
-      <PrimaryBtn accent={accent} disabled={!selected} onClick={onNext} className="mt-3">
-        Continue
-      </PrimaryBtn>
+      {!quoteOnly && (
+        <PrimaryBtn accent={accent} disabled={!selected} onClick={onNext} className="mt-3">
+          Continue
+        </PrimaryBtn>
+      )}
     </div>
   );
 }
@@ -415,11 +517,17 @@ function NoSlotsCapture({
   serviceId,
   accent,
   requestedDate,
+  reason = "no_openings",
+  unitNote,
 }: {
   publicKey: string;
   serviceId: string;
   accent: string;
   requestedDate: string;
+  /** Why the customer is here: no slots that day, or a service that is quoted. */
+  reason?: "no_openings" | "quote_only";
+  /** e.g. "$2.50 per sq ft", shown when the service is quoted. */
+  unitNote?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -445,16 +553,29 @@ function NoSlotsCapture({
   if (!open) {
     return (
       <div className="rounded-[10px] border border-dashed border-line-strong px-4 py-6 text-center">
-        <p className="text-[0.82rem] text-ink-faint">
-          No openings this day. Try another date, or ask for a time that suits you.
-        </p>
+        {reason === "quote_only" ? (
+          <>
+            <p className="text-[0.82rem] font-semibold text-ink">
+              This service is priced on the size of the job
+            </p>
+            <p className="mt-1 text-[0.8rem] text-ink-faint">
+              {unitNote ? `${unitNote}. ` : ""}
+              The business needs to measure up before it can give you a total, so
+              it is quoted rather than booked online.
+            </p>
+          </>
+        ) : (
+          <p className="text-[0.82rem] text-ink-faint">
+            No openings this day. Try another date, or ask for a time that suits you.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => setOpen(true)}
           className="mt-3 rounded-[9px] px-4 py-2 text-[0.82rem] font-semibold text-white transition-opacity hover:opacity-90"
           style={{ backgroundColor: accent }}
         >
-          Request another time
+          {reason === "quote_only" ? "Request a quote" : "Request another time"}
         </button>
       </div>
     );
@@ -464,10 +585,13 @@ function NoSlotsCapture({
 
   return (
     <div className="rounded-[10px] border border-line-strong px-4 py-4">
-      <p className="text-[0.82rem] font-semibold text-ink">Ask for a time</p>
+      <p className="text-[0.82rem] font-semibold text-ink">
+        {reason === "quote_only" ? "Ask for a quote" : "Ask for a time"}
+      </p>
       <p className="mt-1 mb-3 text-[0.74rem] leading-[1.5] text-ink-faint">
-        Leave your details and what suits you. This does not reserve a slot —
-        the business will get back to you.
+        {reason === "quote_only"
+          ? "Leave your details and the size of the job. This is not a booking and no price is confirmed — the business will come back to you with a quote."
+          : "Leave your details and what suits you. This does not reserve a slot — the business will get back to you."}
       </p>
       <div className="space-y-2.5">
         <input
@@ -1015,17 +1139,29 @@ function DoneStep({
             </p>
           )}
           {result.recurrence.skipped.length > 0 && (
+            /*
+              Skipped dates now say WHY. They used to all be described as
+              "already taken", which was the only case the old copied-row
+              insert could detect — a visit that fell on a closed day, on
+              approved leave, or on a day nobody qualified was working looked
+              identical to a clash.
+            */
             <p className="mt-1.5">
-              These dates were already taken and were{" "}
-              <span className="font-semibold text-ink">not</span> booked:{" "}
+              These dates could <span className="font-semibold text-ink">not</span>{" "}
+              be reserved:{" "}
               {result.recurrence.skipped
-                .map((iso) =>
-                  new Date(iso).toLocaleDateString("en-US", {
+                .map((iso) => {
+                  const when = new Date(iso).toLocaleDateString("en-US", {
                     timeZone: tz,
                     month: "short",
                     day: "numeric",
-                  }),
-                )
+                  });
+                  const reason = result.recurrence?.skippedReasons?.find(
+                    (r) => r.startsAt === iso,
+                  )?.reason;
+                  const why = skippedReasonText(reason);
+                  return why ? `${when} (${why})` : when;
+                })
                 .join(", ")}
               . Contact the business to find an alternative.
             </p>
@@ -1043,10 +1179,26 @@ function DoneStep({
             )}
         </div>
       )}
+      {/*
+        What the customer is told about the confirmation email is now what
+        actually happened. `confirmation_sent` is set from the provider's own
+        response; `emailWillSend` only ever meant "this business has a sender
+        configured", so a rejected or failed send still read as "sent".
+      */}
       <p className="mt-4 text-[0.8rem] text-ink-faint">
-        {emailWillSend ? (
+        {result.confirmation_sent === true ? (
           <>
             A confirmation has been sent to{" "}
+            <span className="font-semibold text-ink-muted">{email}</span>.
+          </>
+        ) : result.confirmation_sent === false ? (
+          <>
+            We could not send a confirmation email just now, so please save
+            these details. Your appointment is booked either way.
+          </>
+        ) : emailWillSend ? (
+          <>
+            A confirmation is on its way to{" "}
             <span className="font-semibold text-ink-muted">{email}</span>.
           </>
         ) : (

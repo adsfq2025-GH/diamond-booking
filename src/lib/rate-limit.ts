@@ -1,25 +1,29 @@
 import "server-only";
 
+import { createAdminClient } from "@/lib/supabase/server";
+
 /**
- * Best-effort in-process rate limiting (A32, A40).
+ * Rate limiting for the public, unauthenticated surfaces: the booking server
+ * actions (fetchSlots, submitBooking), the enquiry form and the geocode proxy.
+ * Anyone holding a widget public key — which is embedded in every page the
+ * widget appears on — can call these, and each booking also sends a
+ * confirmation email and queues reminders (A32, A40).
  *
- * The public booking server actions (fetchSlots, submitBooking) and the
- * geocode proxy are reachable by anyone as plain POSTs/GETs, with no auth, no
- * captcha and no throttle: anyone holding a widget public key — which is
- * embedded in every page the widget appears on — could fill a business's
- * calendar with fake bookings, each of which also sent a confirmation email
- * and queued reminders.
+ * There are two layers, and the difference matters:
  *
- * IMPORTANT, and deliberately stated rather than implied: this counter lives
- * in the process's memory. On a serverless platform each instance has its own,
- * so the effective limit is (limit x instances) and a cold start resets it.
- * It raises the cost of casual abuse; it is not a security boundary. Durable
- * protection needs a shared store (Upstash/Redis) or the platform's own WAF —
- * tracked as follow-up work rather than quietly assumed here.
+ *  - `rateLimit` is an in-process counter. On a serverless platform each
+ *    instance has its own, so the effective limit is (limit x instances) and a
+ *    cold start resets it. It raises the cost of casual abuse and nothing more.
  *
- * The database-side guards are the ones that actually hold: create_booking_inquiry
- * caps enquiries per email per tenant, and the booking RPC's exclusion
- * constraint means spam cannot double-book.
+ *  - `rateLimitDurable` counts in the database, shared by every instance, which
+ *    is what the review asked for before wider exposure: "replace in-process
+ *    public rate limiting with a durable boundary". Use it for the write paths
+ *    (bookings, enquiries); the in-process one is fine for cheap reads.
+ *
+ * Neither is an authorization boundary — the caller key comes from proxy
+ * headers and is spoofable. The guards that actually hold are in the database:
+ * create_booking_inquiry caps enquiries per email per tenant, and the booking
+ * RPC's exclusion constraint means spam cannot double-book.
  */
 
 interface Bucket {
@@ -44,8 +48,8 @@ export interface RateLimitResult {
 }
 
 /**
- * Consume one token for `key`. Returns ok:false once `limit` is exceeded
- * within `windowMs`.
+ * Consume one token for `key` in this process. Returns ok:false once `limit`
+ * is exceeded within `windowMs`.
  */
 export function rateLimit(
   key: string,
@@ -66,6 +70,46 @@ export function rateLimit(
     return { ok: false, retryAfter: Math.ceil((bucket.resetAt - now) / 1000) };
   }
   return { ok: true, retryAfter: 0 };
+}
+
+/**
+ * Consume one token for `key` against the shared database counter, so the
+ * limit holds across every serverless instance and survives cold starts.
+ *
+ * The in-process counter is consulted first: it is free, and a caller already
+ * over the limit on this instance never needs a round trip. If the database
+ * cannot be reached the in-process result stands — a throttle that fails open
+ * is the lesser evil here, because failing closed would take public booking
+ * down with it. That trade-off is deliberate and worth knowing about.
+ */
+export async function rateLimitDurable(
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<RateLimitResult> {
+  const local = rateLimit(key, limit, windowMs);
+  if (!local.ok) return local;
+
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin.rpc("consume_rate_limit", {
+      p_key: key,
+      p_limit: limit,
+      p_window_seconds: Math.max(1, Math.round(windowMs / 1000)),
+    });
+    if (error) {
+      console.error("[rate-limit] durable counter unavailable", error);
+      return local;
+    }
+    const result = data as unknown as { allowed?: boolean; retry_after?: number } | null;
+    if (result?.allowed === false) {
+      return { ok: false, retryAfter: Math.max(1, Number(result.retry_after ?? 60)) };
+    }
+    return { ok: true, retryAfter: 0 };
+  } catch (err) {
+    console.error("[rate-limit] durable counter threw", err);
+    return local;
+  }
 }
 
 /**

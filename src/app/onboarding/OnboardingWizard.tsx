@@ -67,6 +67,10 @@ export function OnboardingWizard({
   const [maxReached, setMaxReached] = useState(Math.min(Math.max(initialStep, 1), 6));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Readiness is re-read when onboarding completes. Rendering the prop the
+  // page was built with meant the success screen could still list "finish
+  // onboarding" as a blocker (O01).
+  const [readiness, setReadiness] = useState<LaunchReadiness>(launchReadiness);
   const reduce = useReducedMotion();
 
   const advance = (next: number | "done") => {
@@ -150,12 +154,40 @@ export function OnboardingWizard({
       6,
     );
 
-  const submitFinish = (next: FinishInput) =>
-    runSave(
-      () => finishOnboarding(next),
-      () => setData((d) => ({ ...d, finish: next })),
-      "done",
-    );
+  const submitFinish = async (next: FinishInput) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await finishOnboarding(next);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setData((d) => ({ ...d, finish: next }));
+      setReadiness((prev) => ({
+        ...prev,
+        onboardingProgress: 1,
+        onboardingComplete: true,
+        blockers: result.readiness.blockers,
+        paymentStatus: next.payments_enabled
+          ? result.readiness.paymentReady
+            ? "ok"
+            : "action_needed"
+          : "ok",
+        status:
+          result.readiness.blockers.length > 0
+            ? "needs_attention"
+            : next.payments_enabled && !result.readiness.paymentReady
+              ? "needs_attention"
+              : "ready",
+      }));
+      advance("done");
+    } catch {
+      setError("Couldn't save — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const progressPct = done ? 100 : Math.round(((step - 1) / 6) * 100);
 
@@ -291,7 +323,7 @@ export function OnboardingWizard({
                     publicKey={publicKey}
                     appUrl={appUrl}
                     businessName={data.business.name}
-                    readiness={launchReadiness}
+                    readiness={readiness}
                   />
                 ) : step === 1 ? (
                   <BusinessStep
@@ -335,7 +367,7 @@ export function OnboardingWizard({
                   <FinishStep
                     value={data.finish}
                     busy={saving}
-                    readiness={launchReadiness}
+                    readiness={readiness}
                     onSubmit={submitFinish}
                     onBack={() => goBack(5)}
                   />

@@ -172,7 +172,12 @@ function AvailabilityTab({ data }: { data: EmployeePortal }) {
   return (
     <div className="space-y-5">
       <Panel>
-        <PanelHeader title="Weekly availability" caption="When you're available for jobs" />
+        {/* Read-only on purpose: there is no editing flow here yet, so the
+            caption says who to ask rather than implying staff can change it. */}
+        <PanelHeader
+          title="Weekly availability"
+          caption="When you're available for jobs — your manager sets these hours"
+        />
         <ul className="divide-y divide-line">
           {data.availability.map((a) => (
             <li key={a.weekday} className="flex items-center justify-between px-5 py-3">
@@ -187,7 +192,10 @@ function AvailabilityTab({ data }: { data: EmployeePortal }) {
         </ul>
       </Panel>
       <Panel>
-        <PanelHeader title="Time off" caption="Requests to be away" />
+        <PanelHeader
+          title="Time off"
+          caption="Requests to be away — ask your manager to add one"
+        />
         {data.timeOff.length === 0 ? (
           <EmptyState icon="calendar" title="No time-off requests" />
         ) : (
@@ -223,13 +231,13 @@ function RequestsTab({ data }: { data: EmployeePortal }) {
       <PanelHeader
         title="Requests"
         caption="Messages to your manager"
+        /* There is no request-submission flow yet: this was a live-looking
+           button with no handler. Until staff can raise a request here, say
+           where to send one instead of pretending the button works. */
         action={
-          <button
-            type="button"
-            className="rounded-[9px] bg-navy-900 px-3.5 py-2 text-[0.8rem] font-semibold text-white transition-colors hover:bg-navy-800"
-          >
-            New request
-          </button>
+          <span className="text-[0.76rem] text-ink-faint">
+            Ask your manager to add a request for now
+          </span>
         }
       />
       <ul className="divide-y divide-line">

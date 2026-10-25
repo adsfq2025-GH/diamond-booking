@@ -32,8 +32,10 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch: {} # lets you trigger a run by hand to test it
 
-# Never let a slow run overlap the next tick: the route claims up to 50
-# pending reminders per call, and two concurrent claims could double-send.
+# Never let a slow run overlap the next tick. Belt and braces: the route now
+# claims its batch with a single atomic UPDATE ... RETURNING, so two concurrent
+# runs cannot pick up the same reminder even without this — but there is no
+# reason to pile runs up, and this keeps the logs readable.
 concurrency:
   group: send-reminders
   cancel-in-progress: false
@@ -73,5 +75,6 @@ jobs:
             401) echo "::error::401 — CRON_SECRET here does not match the one in Vercel."; exit 1 ;;
             404) echo "::error::404 — is APP_URL right, and is the new build deployed?"; exit 1 ;;
             503) echo "::error::503 — the deployment is not configured (Supabase env vars missing in Vercel)."; exit 1 ;;
+            500) echo "::error::500 — the endpoint ran but could not deliver. The body above says how many reminders were claimed and why each one failed; check the production email/SMS sender first."; exit 1 ;;
             *)   echo "::error::Unexpected HTTP $code from the reminder endpoint."; exit 1 ;;
           esac

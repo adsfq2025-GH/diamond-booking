@@ -1,7 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { callerKey, rateLimit } from "@/lib/rate-limit";
+import { callerKey, rateLimit, rateLimitDurable } from "@/lib/rate-limit";
 
 import {
   createBookingInquiry,
@@ -46,7 +46,9 @@ export async function submitBooking(input: CreateBookingInput) {
     return { ok: false as const, error: "Name and email are required." };
   }
 
-  const limit = rateLimit(callerKey(await headers(), "book"), 8, 60 * 60 * 1000);
+  // Durable: a booking sends an email and queues reminders, so the limit has
+  // to hold across instances rather than per cold start.
+  const limit = await rateLimitDurable(callerKey(await headers(), "book"), 8, 60 * 60 * 1000);
   if (!limit.ok) {
     return {
       ok: false as const,
@@ -84,7 +86,7 @@ export async function submitInquiry(input: {
     return { ok: false as const, error: "Name and email are required." };
   }
 
-  const limit = rateLimit(callerKey(await headers(), "inquiry"), 5, 60 * 60 * 1000);
+  const limit = await rateLimitDurable(callerKey(await headers(), "inquiry"), 5, 60 * 60 * 1000);
   if (!limit.ok) {
     return {
       ok: false as const,

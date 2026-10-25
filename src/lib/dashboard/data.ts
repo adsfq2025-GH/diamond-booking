@@ -574,7 +574,12 @@ export const getCalendarData = cache(async (): Promise<CalendarData> => {
       .from("bookings")
       .select("id, status, starts_at, ends_at, service_id, customer_id, employee_id, recurrence_rule")
       .eq("tenant_id", tenantId)
-      .not("status", "in", "(cancelled,rescheduled)"),
+      // Only cancellations leave the calendar. `rescheduled` used to be
+      // excluded here too, so a moved appointment vanished on the next refresh
+      // while still being a real commitment (B01). A move no longer changes
+      // the status at all, and any row left in that state from before still
+      // belongs on the calendar.
+      .not("status", "in", "(cancelled)"),
     lookupServiceNames(supabase, tenantId),
     lookupCustomerNames(supabase, tenantId),
     lookupEmployees(supabase, tenantId),

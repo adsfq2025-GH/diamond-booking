@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import {
   createConnectAccountLink,
   createBillingPortal,
@@ -112,10 +112,18 @@ export async function connectStripeAccount(): Promise<{ ok: false; error: string
   });
   if (!result.ok) return result;
 
-  await supabase
+  // Stripe Connect fields are platform-controlled columns (S01): client roles
+  // no longer hold UPDATE on them, so this reviewed, owner-verified billing
+  // operation writes them with the service role instead.
+  const admin = createAdminClient();
+  const { error: linkError } = await admin
     .from("tenants")
     .update({ stripe_connect_account_id: result.accountId, stripe_connect_status: "pending" })
     .eq("id", profile.tenant_id);
+  if (linkError) {
+    console.error("startStripeConnect: could not record the Connect account", linkError);
+    return { ok: false, error: "We couldn't save your Stripe connection. Please try again." };
+  }
 
   redirect(result.url);
 }
@@ -140,7 +148,9 @@ export async function refreshStripeConnectStatus(): Promise<{ ok: true } | { ok:
   const status = await fetchConnectAccountStatus(tenant.stripe_connect_account_id);
   if (!status) return { ok: false, error: "Stripe isn't configured yet." };
 
-  const { error } = await supabase
+  // Same reason as above: charge and payout readiness are platform fields.
+  const admin = createAdminClient();
+  const { error } = await admin
     .from("tenants")
     .update({
       stripe_connect_status: status.onboardingComplete ? "connected" : "pending",

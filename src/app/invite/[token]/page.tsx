@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { getProfile } from "@/lib/auth";
 import { invitationPreview } from "@/lib/actions/team";
 import { AcceptInviteForm } from "./AcceptInviteForm";
+import { StaffSignupForm } from "./StaffSignupForm";
 
 export const metadata: Metadata = { title: "Accept your invitation" };
 
@@ -67,20 +67,10 @@ export default async function InvitePage({
             {profile ? (
               <AcceptInviteForm token={token} />
             ) : (
-              <div className="mt-5 flex flex-col gap-2">
-                <Link
-                  href={`/login?redirect=/invite/${encodeURIComponent(token)}`}
-                  className="rounded-[10px] bg-navy-700 px-4 py-3 text-center text-[0.88rem] font-semibold text-white transition-colors hover:bg-navy-600"
-                >
-                  Sign in to accept
-                </Link>
-                <Link
-                  href={`/signup?redirect=/invite/${encodeURIComponent(token)}`}
-                  className="rounded-[10px] border border-line-strong px-4 py-3 text-center text-[0.88rem] font-semibold text-ink transition-colors hover:border-blue-600 hover:text-blue-600"
-                >
-                  Create an account
-                </Link>
-              </div>
+              /* New staff register HERE, as staff. The second button used to
+                 point at /signup, which creates a business owner and walks
+                 them into setting up an unrelated business (O02). */
+              <StaffSignupForm token={token} email={preview.email} />
             )}
           </>
         )}

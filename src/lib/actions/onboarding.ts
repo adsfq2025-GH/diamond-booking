@@ -132,7 +132,14 @@ export async function saveServices(
       return { ok: false, error: "Add at least one service before continuing." };
     }
 
+    // A service's identity is its id, not its name. The wizard hydrates
+    // localId from the database row, so an existing service carries its real
+    // uuid here and a brand-new one carries a client-side key. Sending the
+    // uuid lets the upsert match on it: renaming a service that already has
+    // bookings now updates that row instead of creating a second one beside
+    // it and deactivating the original.
     const payload = clean.map((s) => ({
+      id: UUID_RE.test(s.localId) ? s.localId : null,
       name: s.name,
       category: s.category || null,
       // Honour the duration the owner entered for BOTH pricing modes. Hourly
@@ -155,6 +162,7 @@ export async function saveServices(
 
     const addonPayload = addons
       .map((a) => ({
+        id: UUID_RE.test(a.localId) ? a.localId : null,
         name: a.name.trim(),
         price_cents: Math.max(0, Math.round(a.price_cents) || 0),
         // An add-on's duration is what makes availability honest: a 30-minute
@@ -320,17 +328,35 @@ export async function saveBranding(input: BrandingInput): Promise<ActionResult> 
  * Human-readable text for each readiness blocker onboarding_readiness() can
  * report. Owners get told what is actually missing instead of a generic error.
  */
+/** A hydrated localId is the database row's uuid; a new one is not. */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const READINESS_BLOCKERS: Record<string, string> = {
   no_active_services: "no active services",
   no_active_staff: "nobody is set up to do the work",
   no_open_days: "the business is closed every day of the week",
   no_staff_qualified_for_any_service: "no team member is linked to a service",
   no_staff_working_hours: "no team member has any working hours",
+  service_without_bookable_staff:
+    "at least one service has nobody qualified and scheduled for long enough to perform it",
   deposits_configured_without_stripe_charges:
     "services require a deposit but Stripe cannot accept charges yet",
 };
 
-export async function finishOnboarding(input: FinishInput): Promise<ActionResult> {
+export interface FinishOnboardingResult {
+  ok: true;
+  /** Readiness as of AFTER completion, for the success screen. */
+  readiness: {
+    bookingReady: boolean;
+    paymentReady: boolean;
+    blockers: string[];
+  };
+}
+
+export async function finishOnboarding(
+  input: FinishInput,
+): Promise<FinishOnboardingResult | { ok: false; error: string }> {
   try {
     const ctx = await ownerContext();
 
@@ -352,14 +378,29 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
     });
 
     // Bookability defaults so the widget can offer slots on day one:
-    //  - every employee without weekly availability gets rows mirroring the
+    //  - an employee with NO service assignments at all is linked to every
+    //    active service, because a team member assigned to nothing can never
+    //    be booked
+    //  - an employee with no weekly availability gets rows mirroring the
     //    tenant's open business hours
-    //  - every employee is linked to every service
-    // Owners refine both later in the dashboard.
+    //
+    // Both are first-run defaults, not a reconciliation. This used to link
+    // EVERY employee to EVERY service — including inactive rows — every time
+    // the wizard was finished, so an owner who reopened setup to change one
+    // detail silently re-qualified staff they had deliberately unassigned in
+    // the dashboard (O01).
     const [{ data: employees }, { data: services }, { data: hours }] =
       await Promise.all([
-        ctx.supabase.from("employees").select("id").eq("tenant_id", ctx.tenantId),
-        ctx.supabase.from("services").select("id").eq("tenant_id", ctx.tenantId),
+        ctx.supabase
+          .from("employees")
+          .select("id")
+          .eq("tenant_id", ctx.tenantId)
+          .eq("active", true),
+        ctx.supabase
+          .from("services")
+          .select("id")
+          .eq("tenant_id", ctx.tenantId)
+          .eq("active", true),
         ctx.supabase
           .from("business_hours")
           .select("weekday, open_time, close_time, closed")
@@ -369,13 +410,39 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
     const openDays = (hours ?? []).filter(
       (h) => !h.closed && h.open_time && h.close_time,
     );
+    const openWeekdays = new Set(openDays.map((d) => d.weekday));
 
     if (employees && employees.length > 0) {
-      const { data: existing } = await ctx.supabase
+      const employeeIds = employees.map((e) => e.id);
+
+      // Hours changed since the last visit: availability on a day the business
+      // is now closed can never produce a slot, and leaving it behind is what
+      // made readiness disagree with reality. Removing it is the intentional
+      // half of "reconcile hours" — adding rows for newly opened days would
+      // put staff to work without being asked, so that is left to the owner.
+      const { data: existing, error: existingError } = await ctx.supabase
         .from("availability")
-        .select("employee_id")
+        .select("id, employee_id, weekday")
         .eq("tenant_id", ctx.tenantId);
-      const covered = new Set((existing ?? []).map((a) => a.employee_id));
+      if (existingError) throw existingError;
+
+      const staleIds = (existing ?? [])
+        .filter((a) => !openWeekdays.has(a.weekday))
+        .map((a) => a.id);
+      if (staleIds.length > 0) {
+        const { error } = await ctx.supabase
+          .from("availability")
+          .delete()
+          .in("id", staleIds)
+          .eq("tenant_id", ctx.tenantId);
+        if (error) throw error;
+      }
+
+      const covered = new Set(
+        (existing ?? [])
+          .filter((a) => openWeekdays.has(a.weekday))
+          .map((a) => a.employee_id),
+      );
 
       const availabilityRows: TablesInsert<"availability">[] = [];
       for (const employee of employees) {
@@ -398,16 +465,28 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
       }
 
       if (services && services.length > 0) {
+        const { data: currentLinks, error: linksError } = await ctx.supabase
+          .from("employee_services")
+          .select("employee_id")
+          .in("employee_id", employeeIds);
+        if (linksError) throw linksError;
+
+        const alreadyAssigned = new Set(
+          (currentLinks ?? []).map((l) => l.employee_id),
+        );
         const links: TablesInsert<"employee_services">[] = [];
         for (const employee of employees) {
+          if (alreadyAssigned.has(employee.id)) continue; // keep explicit choices
           for (const service of services) {
             links.push({ employee_id: employee.id, service_id: service.id });
           }
         }
-        const { error } = await ctx.supabase
-          .from("employee_services")
-          .upsert(links, { onConflict: "employee_id,service_id" });
-        if (error) throw error;
+        if (links.length > 0) {
+          const { error } = await ctx.supabase
+            .from("employee_services")
+            .upsert(links, { onConflict: "employee_id,service_id" });
+          if (error) throw error;
+        }
       }
     }
 
@@ -434,7 +513,25 @@ export async function finishOnboarding(input: FinishInput): Promise<ActionResult
 
     // Proven bookable: only now is onboarding complete.
     await mergeSettings(ctx, { onboarding_complete: true }, 6);
-    return { ok: true };
+
+    // Re-read readiness AFTER the completion flag is written. The success
+    // screen used to render the readiness prop the page was built with, so it
+    // could still show "finish onboarding" as a blocker on the very screen
+    // telling the owner they had finished (O01).
+    const { data: finalRow } = await ctx.supabase.rpc("onboarding_readiness");
+    const final = (finalRow ?? {}) as {
+      booking_ready?: boolean;
+      payment_ready?: boolean;
+      blockers?: string[];
+    };
+    return {
+      ok: true,
+      readiness: {
+        bookingReady: Boolean(final.booking_ready),
+        paymentReady: Boolean(final.payment_ready),
+        blockers: (final.blockers ?? []).map((b) => READINESS_BLOCKERS[b] ?? b),
+      },
+    };
   } catch (err) {
     unstable_rethrow(err);
     console.error("finishOnboarding failed", err);

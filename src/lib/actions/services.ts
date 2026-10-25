@@ -95,29 +95,43 @@ export async function saveService(input: ServiceDraft): Promise<Result> {
   }
 
   // ---- reconcile add-ons for this service ----
-  const { data: existing } = await supabase
+  // Every write below is checked. They used to be fired and forgotten, so a
+  // rejected delete, update or insert left the editor showing a saved state
+  // the database did not have — visible only after a reload.
+  const { data: existing, error: existingError } = await supabase
     .from("service_addons")
     .select("id")
-    .eq("service_id", serviceId);
+    .eq("service_id", serviceId)
+    .eq("tenant_id", tenantId);
+  if (existingError) return { ok: false, error: existingError.message };
+
   const existingIds = new Set((existing ?? []).map((a) => a.id));
   const keepIds = new Set(input.addons.filter((a) => a.id).map((a) => a.id as string));
 
-  // Which existing add-ons are referenced by a booking? Never delete those.
+  // Which existing add-ons are referenced by a booking? Never delete those:
+  // a past job's extras are part of what the customer was charged for.
   const removable = [...existingIds].filter((id) => !keepIds.has(id));
   let referenced = new Set<string>();
   if (removable.length) {
-    const { data: refs } = await supabase
+    const { data: refs, error: refsError } = await supabase
       .from("booking_addons")
       .select("addon_id")
       .in("addon_id", removable);
+    if (refsError) return { ok: false, error: refsError.message };
     referenced = new Set((refs ?? []).map((r) => r.addon_id));
   }
   const toDelete = removable.filter((id) => !referenced.has(id));
   if (toDelete.length) {
-    await supabase.from("service_addons").delete().in("id", toDelete);
+    const { error } = await supabase
+      .from("service_addons")
+      .delete()
+      .in("id", toDelete)
+      .eq("tenant_id", tenantId);
+    if (error) return { ok: false, error: error.message };
   }
 
-  // Update existing, insert new.
+  // Update existing, insert new. An add-on is matched by its id, never by its
+  // name, so renaming one updates it instead of replacing it.
   for (const a of input.addons) {
     const aName = a.name.trim();
     if (!aName) continue;
@@ -129,9 +143,17 @@ export async function saveService(input: ServiceDraft): Promise<Result> {
       duration_minutes: Math.max(0, Math.round(a.durationMinutes) || 0),
     };
     if (a.id && existingIds.has(a.id)) {
-      await supabase.from("service_addons").update(row).eq("id", a.id);
+      const { error } = await supabase
+        .from("service_addons")
+        .update(row)
+        .eq("id", a.id)
+        .eq("tenant_id", tenantId);
+      if (error) return { ok: false, error: error.message };
     } else {
-      await supabase.from("service_addons").insert(row as TablesInsert<"service_addons">);
+      const { error } = await supabase
+        .from("service_addons")
+        .insert(row as TablesInsert<"service_addons">);
+      if (error) return { ok: false, error: error.message };
     }
   }
 
@@ -155,7 +177,26 @@ export async function deleteService(id: string): Promise<{ ok: boolean; error?: 
   if (!supabaseEnvConfigured()) return { ok: false, error: "Preview mode." };
   const s = await scope();
   if (!s) return { ok: false, error: "No business found." };
-  await s.supabase.from("service_addons").delete().eq("service_id", id);
+  // Check the service is deletable BEFORE removing its add-ons. Deleting the
+  // add-ons first meant a service with bookings — which the database refuses
+  // to delete — lost its extras anyway, with nothing rolled back.
+  const { count, error: refError } = await s.supabase
+    .from("bookings")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", s.tenantId)
+    .eq("service_id", id);
+  if (refError) return { ok: false, error: refError.message };
+  if ((count ?? 0) > 0) {
+    return { ok: false, error: "This service has bookings — deactivate it instead of deleting." };
+  }
+
+  const { error: addonError } = await s.supabase
+    .from("service_addons")
+    .delete()
+    .eq("service_id", id)
+    .eq("tenant_id", s.tenantId);
+  if (addonError) return { ok: false, error: addonError.message };
+
   const { error } = await s.supabase.from("services").delete().eq("id", id).eq("tenant_id", s.tenantId);
   if (error) {
     return { ok: false, error: "This service has bookings — deactivate it instead of deleting." };
