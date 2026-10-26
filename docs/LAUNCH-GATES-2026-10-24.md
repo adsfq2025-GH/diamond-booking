@@ -5,12 +5,71 @@ This records what changed in response to the two review documents
 24 October client edition), finding by finding, and — just as importantly —
 what is **not** closed by code and still needs a person.
 
-Everything below is a source change. **Nothing here has been executed against a
-database or a deployment.** The review's own standard applies to this document
-too: "implemented", "build succeeded" and "test script exists" are different
-from "workflow passed". The acceptance checklist (T01–T20 in the review) is
-still the gate, and `supabase/migrations/0013_launch_gates.sql` has not been
-applied anywhere yet.
+**Status: applied and deployed on 25 October 2026.** See *Deployment record*
+below for what was verified and how. The review's own standard still applies:
+"implemented", "build succeeded" and "deployed" are different from "workflow
+passed", and the acceptance checklist (T01–T20 in the review) remains the gate.
+Everything in *Not closed by this work* is still open.
+
+---
+
+## Deployment record — 25 October 2026
+
+| What | Where | Evidence |
+| --- | --- | --- |
+| `0013_launch_gates.sql` | Supabase `vfjhdghvjfdowwxvjytp` | Applied in one transaction. Dry run first (`begin … rollback`), which **executes** every statement against real data before discarding it — the parse and the rehearsal this migration had never had. |
+| `0014_pricing_unit_default.sql` | same | Applied the same way. |
+| `ebb471d` (code) | Vercel `diamond-booking` → `bqoc1715s` | `www.diamond-booking.com` served by `dpl_G4w1sD8K4UGAoWwigCLWuBmwRLJB`, read from Vercel's own request logs. |
+
+Verified after applying, rather than assumed:
+
+- `no_double_booking` predicate is now `pending, confirmed, rescheduled`.
+- All seven new columns present on `bookings` / `booking_reminders`.
+- `tenants_guard_privileged`, `bookings_guard_fields`, `profiles_guard_identity`
+  all installed.
+- `authenticated` may UPDATE only nine business-profile columns on `tenants`:
+  `plan`, `subscription_status`, `suspended`, `billing_cycle` and every
+  `stripe_*` column are gone. **S01 is closed at the boundary, not just in the
+  UI.**
+- Exactly one `create_widget_booking` overload (12 args); the old 10-arg
+  version dropped cleanly, so no call can resolve to the un-gated one.
+- Three live services quote `HTTP 200` with totals matching the catalog exactly.
+- Public pages 200; `/dashboard` and `/onboarding` 307; both cron endpoints 401.
+
+Two incidental findings worth keeping:
+
+- There were **zero** `rescheduled` rows, so nothing needed promoting and no
+  slot had actually been double-sold. B01 was latent, not yet realised.
+- One reminder row exists in total, status `sent` — the October 19th overdue
+  row has gone through. With 55 bookings and one reminder row, reminder
+  *queueing* is the thing to watch in the pilot, not just delivery.
+
+### Two operational lessons from the rollout
+
+**1. The migration must land before the code.** The code was pushed first by
+accident, and for about two hours the live build called
+`create_widget_booking`/`quote_booking` with parameters the database did not
+have yet — PostgREST answered `PGRST202` and the price and submit steps failed.
+The reverse order is safe: the new functions give the added parameters
+defaults, so a 10-argument call from an older build still resolves. Apply the
+migration, then deploy.
+
+**2. `diamond-booking.vercel.app` is a manually pinned alias.** New production
+deployments do **not** claim it — `vercel promote` returns
+`409 already the current production deployment` while the public domain
+continues serving the old build. The custom domain follows that alias, and it
+is not in this project's `vercel domains ls`, so the Vercel dashboard's idea of
+"production" and what customers see can diverge silently. Finish every deploy
+with:
+
+```bash
+vercel alias set <new-deployment-url> diamond-booking.vercel.app
+```
+
+Then confirm from the logs which deployment answered the public domain.
+Comparing response bytes does **not** work as a build fingerprint: the
+marketing pages are edge-cached and unchanged between builds, so identical
+output proves nothing.
 
 ---
 
@@ -126,6 +185,22 @@ two-hour minimum was advertised and booked at $50. The tenant's
 - `service_effective_buffers()` applies the tenant default as a documented
   fallback: a service with its own after-buffer keeps it, a service with none
   inherits the business-wide gap.
+
+**Follow-up, 25 October (`4ebfc0a`, `ebb471d`, `0014`).** Reading the column
+exposed a defect underneath it: `pricing_unit` defaulted to `'hourly'` in the
+0009 column definition, in the onboarding RPC fallback, and in three places in
+the wizard — so all 13 services in production claimed hourly pricing without
+anyone choosing it, none with a `minimum_hours`. The booking page therefore
+rendered "$360.00 per hour" under a $360 flat job. The label was corrected
+first, then the cause: `flat` is now the default everywhere, and the migration
+relabelled only services claiming `hourly` with **no** minimum hours. Those
+were already billed as exactly one unit, so no amount moved — confirmed by
+quoting all three live services before and after. A service with a real
+minimum was left alone.
+
+This is worth remembering as a pattern rather than a one-off: a column whose
+default asserts something untrue about every row stays harmless only while
+nothing reads it.
 
 ---
 
@@ -306,17 +381,18 @@ rows matching the address the session just authenticated, on sign-in.
 ## Not closed by this work
 
 These were in the review and **cannot be fixed in the repository**. They are
-the remaining launch gates.
+the remaining launch gates. The migration and deployment rows are gone — those
+are done, and recorded in *Deployment record* above.
 
 | Item | Who | Why it is still open |
 | --- | --- | --- |
-| Apply `0013_launch_gates.sql` | Developer | Not run anywhere. Apply to staging first; it rebuilds the `no_double_booking` constraint and may stop with booking ids that need a decision. |
-| Reminder delivery cause | Developer + owner | Check `APP_URL`, `CRON_SECRET` and the production sender; then prove a reminder was *received*, not just attempted. |
+| Reminder delivery, proven | Developer + owner | The worker is now atomic, retrying and loud on failure, and the queue is clean — but **no reminder has been observed arriving**. Send one to an authorized inbox and record the queue transition plus the provider's delivery result. Do not trigger the worker casually: it sends real messages. |
+| Wizard default, end to end | Tester | `pricing_unit` now defaults to `flat` in the column, the RPC and the wizard, verified at source level and by the deployed commit — but the wizard sits behind auth, so nobody has added a service through it and checked the saved unit and quoted total. T02/T09. |
 | Leaked-password protection | Owner | A Supabase Auth dashboard setting. |
 | Credential rotation after the earlier exposure | Owner | The review could not verify it happened. |
 | Backups and a restore rehearsal | Owner + developer | Policy unverified; rehearse a staging restore and record the rollback steps for app and database together. |
 | Monitoring and an incident log | Owner | Assign an owner for failed jobs, undelivered messages and booking errors. The reminder route's 500 is only useful if something is watching. |
-| Production configuration | Owner | Confirm app URL, Supabase project, sender, OAuth redirects and job secrets in the Vercel account that owns this deployment. |
+| Production configuration | Owner | Partly answered: the deployment lives in Vercel account **`adsfq2025-3449`**, project `diamond-booking`, against Supabase **`vfjhdghvjfdowwxvjytp`**. Still unconfirmed: the email sender, the OAuth redirect URLs, and that `CRON_SECRET` in the GitHub repository secrets matches Vercel's. Note the audit's "the connected account did not expose this project" was an account mismatch, not a missing project — see the alias lesson above. |
 | Stripe configuration and money-flow acceptance | Owner | Separate workstream. Online **deposit capture is still not implemented** — there is no browser confirmation step, and `STRIPE_DEPOSIT_CAPTURE_ENABLED` must stay off. Adding keys does not finish it. |
 | Data pagination and query limits | Developer | **Not addressed.** The review asked for this "before larger adoption". Several dashboard reads still select whole tables for a tenant (bookings, customers), which is fine at pilot size and not fine beyond it. |
 | T01–T20 acceptance runs | Tester | No fresh production write tests, payments, invitations, cancellations, emails or SMS were triggered by this work. |
@@ -324,8 +400,9 @@ the remaining launch gates.
 ## Pilot scope this supports
 
 A pay-later pilot of one to three owner-managed businesses, one-time bookings,
-once the migration is applied and the delivery and operational gates above
-pass. Recurring bookings and staff self-service remain out of scope until
+once the delivery and operational gates above pass. The migration and
+deployment preconditions are met; reminder delivery, backups, monitoring and
+the T01-T20 runs are not. Recurring bookings and staff self-service remain out of scope until
 their own acceptance runs pass — recurrence is now correct by construction, but
 "correct by construction" is not the same as tested, and the review is right
 that it should stay off until it is.
