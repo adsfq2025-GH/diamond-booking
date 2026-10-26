@@ -101,7 +101,10 @@ export default async function OnboardingPage({
       deposit_cents: s.deposit_cents,
       buffer_before_minutes: s.buffer_before_minutes,
       buffer_after_minutes: s.buffer_after_minutes,
-      pricing_unit: (s.pricing_unit ?? "hourly") as ServiceInput["pricing_unit"],
+      // Flat when the column is empty. This used to read "hourly", matching
+      // the old 0009 column default, so the wizard showed every service as
+      // hourly whether or not anyone had chosen that.
+      pricing_unit: (s.pricing_unit ?? "flat") as ServiceInput["pricing_unit"],
       custom_pricing_unit_label: s.pricing_unit_label ?? "",
       minimum_hours:
         s.minimum_hours ?? Math.max(1, Math.round((s.duration_minutes / 60) * 2) / 2),

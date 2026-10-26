@@ -155,7 +155,7 @@ export async function saveServices(
       buffer_after_minutes: Math.max(0, Math.round(s.buffer_after_minutes) || 0),
       // Persisted so reopening the wizard shows the model the owner chose,
       // instead of re-presenting every service as hourly.
-      pricing_unit: s.pricing_unit ?? "hourly",
+      pricing_unit: s.pricing_unit ?? "flat",
       minimum_hours: s.minimum_hours ?? null,
       pricing_unit_label: s.custom_pricing_unit_label?.trim() || null,
     }));

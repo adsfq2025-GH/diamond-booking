@@ -28,7 +28,10 @@ function blankService(): ServiceInput {
     deposit_cents: 0,
     buffer_before_minutes: 0,
     buffer_after_minutes: 15,
-    pricing_unit: "hourly",
+    // A new service is a flat total until the owner says otherwise. Starting
+    // on "Per hour" meant the common case had to be corrected rather than
+    // chosen, and nobody did.
+    pricing_unit: "flat",
     custom_pricing_unit_label: "",
     minimum_hours: 2,
   };
@@ -94,7 +97,7 @@ export function ServicesStep({
         deposit_cents: t.deposit_cents,
         buffer_before_minutes: t.buffer_before_minutes,
         buffer_after_minutes: t.buffer_after_minutes,
-        pricing_unit: "hourly",
+        pricing_unit: "flat",
         custom_pricing_unit_label: "",
         minimum_hours: Math.max(1, Math.round((t.duration_minutes / 60) * 2) / 2),
       },
@@ -257,7 +260,7 @@ export function ServicesStep({
                   <select
                     id={`${s.localId}-pricing-type`}
                     className={inputBase}
-                    value={s.pricing_unit ?? "hourly"}
+                    value={s.pricing_unit ?? "flat"}
                     onChange={(e) => update(s.localId, { pricing_unit: e.target.value as ServiceInput["pricing_unit"] })}
                   >
                     <option value="flat">Flat rate</option>
